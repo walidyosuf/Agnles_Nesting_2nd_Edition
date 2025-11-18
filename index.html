@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Angle Section Cutting Optimizer (L-Sections) - Enhanced</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#059669',
+                        secondary: '#3b82f6',
+                        background: '#f8f8f8',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8f8f8; }
+        .card { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); }
+        .table-container { max-height: 500px; overflow-y: auto; }
+        .table-container::-webkit-scrollbar { width: 8px; }
+        .table-container::-webkit-scrollbar-thumb { background-color: #d1d5db; border-radius: 4px; }
+        .table-container::-webkit-scrollbar-track { background-color: #f3f4f6; }
+        
+        .raw-length-tag {
+            background-color: #f0fdf4;
+            color: #065f46;
+            border: 1px solid #d1fae5;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .total-row {
+            background-color: #e0f2f1;
+            font-weight: bold;
+            border-top: 3px double #065f46;
+        }
+        
+        .radio-option {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .radio-option:hover {
+            border-color: #3b82f6;
+        }
+        
+        .radio-option.selected {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        
+        .radio-option input {
+            margin-right: 12px;
+        }
+    </style>
+
+    <!-- Essential Libraries for Excel/PDF Handling -->
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@sheetjs/xlsx-js-style@latest/dist/xlsx.bundle.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
+</head>
+<body class="p-4 md:p-8">
+
+    <header class="text-center mb-8">
+        <h1 class="text-4xl font-extrabold text-gray-800">Angle Section Cutting Optimizer (L-Sections)</h1>
+        <p class="text-gray-500 mt-2">Enhanced optimization with 10cm length increments and unlimited stock length selection</p>
+    </header>
+
+    <main class="max-w-7xl mx-auto">
+        <!-- Input & Controls Card -->
+        <div class="card bg-white p-6 rounded-xl mb-8 border border-gray-200">
+            <h2 class="text-2xl font-semibold mb-4 text-primary">1. Data Import & Settings</h2>
+            
+            <!-- Raw Material Length Selection -->
+            <div class="mb-6">
+                <h3 class="text-lg font-medium text-gray-700 mb-3">Raw Material Length Selection</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="radio-option" onclick="selectOption('fixed')" id="fixed-option">
+                        <input type="radio" id="fixed-length" name="raw-material" value="fixed" checked>
+                        <label for="fixed-length" class="cursor-pointer">
+                            <div class="font-semibold">Fixed 12M Length</div>
+                            <div class="text-sm text-gray-500">Use standard 12-meter (12000mm) raw material lengths for all cuts</div>
+                        </label>
+                    </div>
+                    <div class="radio-option" onclick="selectOption('variable')" id="variable-option">
+                        <input type="radio" id="variable-length" name="raw-material" value="variable">
+                        <label for="variable-length" class="cursor-pointer">
+                            <div class="font-semibold">Variable Lengths (Optimized)</div>
+                            <div class="text-sm text-gray-500">Optimize with 10cm increments (6000mm to 13000mm)</div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                <!-- File Input -->
+                <div class="col-span-1">
+                    <label for="excel-file" class="block text-sm font-medium text-gray-700 mb-2">Upload Excel Requirements Sheet (.xlsx)</label>
+                    <input type="file" id="excel-file" accept=".xlsx" class="w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-full file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-primary/10 file:text-primary
+                        hover:file:bg-primary/20
+                    ">
+                </div>
+                <!-- Calculate Button -->
+                <div class="col-span-1">
+                    <button id="calculate-btn" onclick="processFile()" disabled class="w-full bg-primary text-white py-3 px-6 rounded-full font-bold transition duration-200 hover:bg-primary/80 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        Generate Cutting Plan
+                    </button>
+                </div>
+                <!-- Loading Indicator -->
+                <div id="loading-indicator" class="col-span-1 hidden text-center md:text-left">
+                    <div class="flex items-center space-x-2 justify-center md:justify-start">
+                        <svg class="animate-spin h-5 w-5 text-secondary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="text-gray-600">Processing optimization...</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Message Box -->
+            <div id="message-box" class="mt-4 p-3 rounded-lg text-sm hidden"></div>
+
+            <!-- Download Buttons -->
+            <div id="download-controls" class="mt-6 border-t pt-4 hidden">
+                <h3 class="text-lg font-semibold mb-3 text-secondary">2. Export Options</h3>
+                <div class="flex flex-wrap gap-4">
+                    <button onclick="exportToExcel()" class="flex items-center px-4 py-2 bg-green-600 text-white rounded-full font-medium hover:bg-green-700 transition duration-150">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        Export to Excel
+                    </button>
+                    <button onclick="exportToPDF()" class="flex items-center px-4 py-2 bg-red-600 text-white rounded-full font-medium hover:bg-red-700 transition duration-150">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        Export to PDF
+                    </button>
+                    <button onclick="window.print()" class="flex items-center px-4 py-2 bg-gray-600 text-white rounded-full font-medium hover:bg-gray-700 transition duration-150">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m4 0v3m0 0h-4v-3m8 0v3m0 0h4v-3M7 9h10a1 1 0 011 1v4a1 1 0 01-1 1H7a1 1 0 01-1-1v-4a1 1 0 011-1z"></path></svg>
+                        Print Plan
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Output Area -->
+        <div id="output-area" class="hidden">
+            <!-- Overall Summary Report -->
+            <div class="card bg-white p-6 rounded-xl mb-8 border border-gray-200">
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">3. Overall Optimization Summary</h2>
+                <div id="overall-summary" class="grid grid-cols-3 gap-4 text-center border p-4 rounded-lg bg-primary/5">
+                    <!-- Data will be inserted here -->
+                </div>
+                <h2 class="text-xl font-semibold mt-6 mb-3 text-primary">3.1. Cutting Plan Details by Material Group</h2>
+                <div id="summary-table" class="table-container"></div>
+            </div>
+
+            <!-- Scrap Report -->
+            <div class="card bg-white p-6 rounded-xl mb-8 border border-gray-200">
+                <h2 class="text-2xl font-semibold mb-4 text-secondary">4. Valuable Scrap Report (≥ 1.5 m)</h2>
+                <p class="text-sm text-gray-600 mb-4">Aggregated by identical length for easy inventory.</p>
+                <div id="scrap-table" class="table-container"></div>
+            </div>
+
+            <!-- Detailed Plan -->
+            <div class="card bg-white p-6 rounded-xl mb-8 border border-gray-200">
+                <h2 class="text-2xl font-semibold mb-4 text-primary">5. Detailed Cutting Plan Statement (Aggregated)</h2>
+                <div id="detail-plan" class="space-y-6"></div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- CONSTANTS ---
+        const MIN_RAW_LENGTH = 6000; // 6 meters in mm
+        const MAX_RAW_LENGTH = 13000; // 13 meters in mm
+        const SCRAP_THRESHOLD = 1500; // 1.5 meters in mm
+        const LENGTH_INCREMENT = 100; // 10 cm increment
+
+        // Generate Available Raw Material Lengths with 10cm increments
+        const AVAILABLE_LENGTHS = [];
+        for (let length = MIN_RAW_LENGTH; length <= MAX_RAW_LENGTH; length += LENGTH_INCREMENT) {
+            AVAILABLE_LENGTHS.push(length);
+        }
+        AVAILABLE_LENGTHS.sort((a, b) => b - a); // Sort descending
+        
+        // Fixed 12M length option
+        const FIXED_LENGTH = 12000;
+
+        // قاعدة بيانات الأوزان الطولية للزوايا المتساوية
+        const ANGLE_WEIGHTS = {};
+
+        // بيانات الجدول المرفق (Angles Profiles unit wt.xlsx)
+        const tableData = [
+            ["20X20X3", "L20*3", 0.882],
+            ["20X20X4", "L20*4", 1.14],
+            ["25X25X3", "L25*3", 1.12],
+            ["25X25X4", "L25*4", 1.45],
+            ["25X25X5", "L25*5", 1.76],
+            ["30X30X3", "L30*3", 1.36],
+            ["30X30X4", "L30*4", 1.78],
+            ["30X30X5", "L30*5", 2.18],
+            ["35X35X3", "L35*3", 1.6],
+            ["35X35X4", "L35*4", 2.09],
+            ["35X35X5", "L35*5", 2.57],
+            ["40X40X3", "L40*3", 1.84],
+            ["40X40X4", "L40*4", 2.42],
+            ["40X40X5", "L40*5", 2.97],
+            ["40X40X6", "L40*6", 3.52],
+            ["45X45X3", "L45*3", 2.09],
+            ["45X45X4", "L45*4", 2.74],
+            ["45X45X4.5", "L45*4.5", 3.06],
+            ["45X45X5", "L45*5", 3.38],
+            ["45X45X6", "L45*6", 4],
+            ["50X50X3", "L50*3", 2.33],
+            ["50X50X4", "L50*4", 3.06],
+            ["50X50X5", "L50*5", 3.77],
+            ["50X50X6", "L50*6", 4.47],
+            ["50X50X7", "L50*7", 5.15],
+            ["50X50X8", "L50*8", 5.82],
+            ["55X55X4", "L55*4", 3.38],
+            ["55X55X5", "L55*5", 4.18],
+            ["55X55X6", "L55*6", 4.95],
+            ["55X55X8", "L55*8", 6.46],
+            ["60X60X4", "L60*4", 3.7],
+            ["60X60X5", "L60*5", 4.57],
+            ["60X60X6", "L60*6", 5.42],
+            ["60X60X8", "L60*8", 7.09],
+            ["60X60X10", "L60*10", 8.69],
+            ["63X63X4", "L63*4", 3.9],
+            ["63X63X5", "L63*5", 4.81],
+            ["63X63X6", "L63*6", 5.72],
+            ["65X65X5", "L65*5", 4.97],
+            ["65X65X6", "L65*6", 5.91],
+            ["65X65X7", "L65*7", 6.83],
+            ["65X65X8", "L65*8", 7.66],
+            ["70X70X5", "L70*5", 5.37],
+            ["70X70X6", "L70*6", 6.38],
+            ["70X70X7", "L70*7", 7.38],
+            ["70X70X8", "L70*8", 8.36],
+            ["70X70X9", "L70*9", 9.34],
+            ["70X70X10", "L70*10", 10.3],
+            ["75X75X5", "L75*5", 5.78],
+            ["75X75X6", "L75*6", 6.85],
+            ["75X75X7", "L75*7", 7.94],
+            ["75X75X8", "L75*8", 8.99],
+            ["75X75X9", "L75*9", 10.1],
+            ["75X75X10", "L75*10", 11.1],
+            ["80X80X6", "L80*6", 7.34],
+            ["80X80X7", "L80*7", 8.49],
+            ["80X80X8", "L80*8", 9.63],
+            ["80X80X10", "L80*10", 11.9],
+            ["80X80X12", "L80*12", 14],
+            ["90X90X6", "L90*6", 8.3],
+            ["90X90X7", "L90*7", 9.61],
+            ["90X90X8", "L90*8", 10.9],
+            ["90X90X9", "L90*9", 12.2],
+            ["90X90X10", "L90*10", 13.4],
+            ["90X90X12", "L90*12", 15.9],
+            ["100X100X6", "L100*6", 9.26],
+            ["100X100X6.5", "L100*6.5", 10.1],
+            ["100X100X7", "L100*7", 10.7],
+            ["100X100X8", "L100*8", 12.2],
+            ["100X100X9", "L100*9", 13.6],
+            ["100X100X10", "L100*10", 15],
+            ["100X100X12", "L100*12", 17.8],
+            ["100X100X14", "L100*14", 20.6],
+            ["100X100X15", "L100*15", 21.9],
+            ["100X100X16", "L100*16", 23.2],
+            ["110X110X6", "L110*6", 10.2],
+            ["110X110X7", "L110*7", 11.8],
+            ["110X110X8", "L110*8", 13.4],
+            ["110X110X9", "L110*9", 15],
+            ["110X110X10", "L110*10", 16.6],
+            ["110X110X12", "L110*12", 19.7],
+            ["110X110X16", "L110*16", 25.7],
+            ["120X120X8", "L120*8", 14.7],
+            ["120X120X9", "L120*9", 16.5],
+            ["120X120X10", "L120*10", 18.2],
+            ["120X120X11", "L120*11", 19.9],
+            ["120X120X12", "L120*12", 21.6],
+            ["120X120X13", "L120*13", 23.3],
+            ["120X120X15", "L120*15", 26.6],
+            ["125X125X8", "L125*8", 15.5],
+            ["125X125X9", "L125*9", 17.3],
+            ["125X125X10", "L125*10", 19.1],
+            ["125X125X12", "L125*12", 22.7],
+            ["125X125X14", "L125*14", 26.2],
+            ["125X125X16", "L125*16", 29.6],
+            ["130X130X8", "L130*8", 15.9],
+            ["130X130X9", "L130*9", 17.9],
+            ["130X130X10", "L130*10", 19.7],
+            ["130X130X11", "L130*11", 21.7],
+            ["130X130X12", "L130*12", 23.6],
+            ["130X130X13", "L130*13", 25.4],
+            ["130X130X14", "L130*14", 27.2],
+            ["130X130X16", "L130*16", 30.9],
+            ["140X140X9", "L140*9", 19.4],
+            ["140X140X10", "L140*10", 21.5],
+            ["140X140X12", "L140*12", 25.5],
+            ["140X140X13", "L140*13", 27.5],
+            ["150X150X10", "L150*10", 22.05],
+            ["150X150X11", "L150*11", 24.255],
+            ["150X150X12", "L150*12", 26.46],
+            ["150X150X13", "L150*13", 28.665],
+            ["150X150X14", "L150*14", 30.87],
+            ["150X150X15", "L150*15", 33.075],
+            ["150X150X16", "L150*16", 35.28],
+            ["150X150X18", "L150*18", 39.69],
+            ["150X150X20", "L150*20", 44.1],
+            ["160X160X10", "L160*10", 24.7],
+            ["160X160X11", "L160*11", 27],
+            ["160X160X12", "L160*12", 29.4],
+            ["160X160X14", "L160*14", 34],
+            ["160X160X15", "L160*15", 36.2],
+            ["160X160X16", "L160*16", 38.5],
+            ["160X160X17", "L160*17", 40.7],
+            ["160X160X18", "L160*18", 43],
+            ["160X160X19", "L160*19", 45.1],
+            ["160X160X20", "L160*20", 47.4],
+            ["175X175X12", "L175*12", 31.8],
+            ["175X175X15", "L175*15", 39.4],
+            ["180X180X12", "L180*12", 33.1],
+            ["180X180X15", "L180*15", 40.9],
+            ["180X180X16", "L180*16", 43.5],
+            ["180X180X18", "L180*18", 48.6],
+            ["180X180X20", "L180*20", 53.7],
+            ["180X180X22", "L180*22", 58.6],
+            ["200X200X12", "L200*12", 36.9],
+            ["200X200X13", "L200*13", 39.9],
+            ["200X200X14", "L200*14", 42.8],
+            ["200X200X15", "L200*15", 45.3],
+            ["200X200X16", "L200*16", 48.5],
+            ["250X250X18", "L250*18", 68.1],
+            ["250X250X19", "L250*19", 71.7],
+            ["250X250X20", "L250*20", 75.3],
+            ["250X250X21", "L250*21", 78.9],
+            ["250X250X22", "L250*22", 82.5],
+            ["250X250X23", "L250*23", 86.1],
+            ["250X250X24", "L250*24", 89.7],
+            ["250X250X25", "L250*25", 93.2],
+            ["250X250X26", "L250*26", 96.7],
+            ["250X250X27", "L250*27", 101],
+            ["250X250X28", "L250*28", 104],
+            ["250X250X29", "L250*29", 107],
+            ["250X250X30", "L250*30", 111],
+            ["250X250X31", "L250*31", 114],
+            ["250X250X32", "L250*32", 118],
+            ["250X250X33", "L250*33", 121],
+            ["250X250X34", "L250*34", 124],
+            ["250X250X35", "L250*35", 128],
+            ["300X300X25", "L300*25", 112],
+            ["300X300X26", "L300*26", 116],
+            ["300X300X27", "L300*27", 121],
+            ["300X300X28", "L300*28", 125],
+            ["300X300X29", "L300*29", 129],
+            ["300X300X30", "L300*30", 133],
+            ["300X300X31", "L300*31", 138],
+            ["300X300X32", "L300*32", 142],
+            ["300X300X33", "L300*33", 146],
+            ["300X300X34", "L300*34", 150],
+            ["300X300X35", "L300*35", 154]
+        ];
+
+        // بناء كائن ANGLE_WEIGHTS من بيانات الجدول
+        for (const row of tableData) {
+            if (row.length < 3) continue;
+            
+            const designation = String(row[0]).toUpperCase().replace(/\*/g, 'X').replace(/\s+/g, '');
+            const profile = String(row[1]).toUpperCase().replace(/\*/g, 'X').replace(/\s+/g, '');
+            const weight = parseFloat(row[2]);
+
+            if (designation && !isNaN(weight)) {
+                ANGLE_WEIGHTS[designation] = weight;
+            }
+            if (profile && !isNaN(weight)) {
+                ANGLE_WEIGHTS[profile] = weight;
+            }
+        }
+
+        // دالة للتعرف على أسماء المقاطع المختلفة
+        function normalizeSectionName(sectionName) {
+            if (!sectionName) return '';
+            let cleanSection = sectionName.toUpperCase().replace(/\s+/g, '').replace(/\*/g, 'X');
+            return cleanSection;
+        }
+
+        // الوزن الطولي لكل متر (كجم/م) للمقاطع المختلفة
+        function getWeightPerMeter(sectionName) {
+            const normalizedSection = normalizeSectionName(sectionName);
+            
+            if (ANGLE_WEIGHTS[normalizedSection]) {
+                return ANGLE_WEIGHTS[normalizedSection];
+            }
+            
+            console.error(`لم يتم العثور على الوزن للقطاع: ${sectionName} (المعيار: ${normalizedSection})`);
+            showMessage(`Warning: Section ${sectionName} not found in database. Weight calculation may be inaccurate.`, 'error');
+            return 0;
+        }
+
+        /**
+         * Converts weight from kg to metric tonnes (t) and formats to one decimal place.
+         * @param {number} kg - Weight in kilograms.
+         * @returns {string} Weight in tonnes with one decimal place.
+         */
+        function convertKgToTonneFormatted(kg) {
+            const tonnes = kg / 1000;
+            return tonnes.toFixed(1);
+        }
+
+        // --- GLOBAL STATE ---
+        let rawData = [];
+        let finalPlan = {};
+        let selectedOption = 'fixed';
+
+        // --- UI UTILITIES ---
+        const fileInput = document.getElementById('excel-file');
+        const calculateBtn = document.getElementById('calculate-btn');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const messageBox = document.getElementById('message-box');
+        const outputArea = document.getElementById('output-area');
+        const downloadControls = document.getElementById('download-controls');
+
+        // Function to select raw material length option
+        function selectOption(option) {
+            selectedOption = option;
+            
+            const fixedOption = document.getElementById('fixed-option');
+            const variableOption = document.getElementById('variable-option');
+            
+            if (option === 'fixed') {
+                fixedOption.classList.add('selected');
+                variableOption.classList.remove('selected');
+                document.getElementById('fixed-length').checked = true;
+            } else {
+                fixedOption.classList.remove('selected');
+                variableOption.classList.add('selected');
+                document.getElementById('variable-length').checked = true;
+            }
+            
+            outputArea.classList.add('hidden');
+            downloadControls.classList.add('hidden');
+        }
+
+        fileInput.addEventListener('change', () => {
+            calculateBtn.disabled = fileInput.files.length === 0;
+            if (fileInput.files.length > 0) {
+                showMessage('File ready to be processed. Click "Generate Cutting Plan".', 'info');
+            } else {
+                hideMessage();
+            }
+            outputArea.classList.add('hidden');
+            downloadControls.classList.add('hidden');
+        });
+
+        function showMessage(text, type = 'error') {
+            messageBox.textContent = text;
+            messageBox.className = 'mt-4 p-3 rounded-lg text-sm';
+            messageBox.classList.remove('hidden');
+
+            if (type === 'error') {
+                messageBox.classList.add('bg-red-100', 'text-red-800');
+            } else if (type === 'success') {
+                messageBox.classList.add('bg-green-100', 'text-green-800');
+            } else {
+                messageBox.classList.add('bg-blue-100', 'text-blue-800');
+            }
+        }
+
+        function hideMessage() {
+            messageBox.classList.add('hidden');
+        }
+
+        function showLoading(show = true) {
+            loadingIndicator.classList.toggle('hidden', !show);
+            calculateBtn.disabled = show;
+        }
+
+        // --- DATA INPUT & PARSING ---
+
+        function processFile() {
+            const file = fileInput.files[0];
+            if (!file) {
+                showMessage('Please select an Excel file first.', 'error');
+                return;
+            }
+
+            showLoading(true);
+            hideMessage();
+            outputArea.classList.add('hidden');
+            downloadControls.classList.add('hidden');
+
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                    rawData = parseAndValidateData(json);
+
+                    if (rawData.length === 0) {
+                        showMessage('File processed, but no valid data found or headers are incorrect. Check that columns A-E contain data (Section, Item/Ref, Length(mm), Qty, Steel Grade).', 'error');
+                        showLoading(false);
+                        return;
+                    }
+
+                    finalPlan = runOptimization(rawData);
+                    renderReports(finalPlan);
+                    outputArea.classList.remove('hidden');
+                    downloadControls.classList.remove('hidden');
+                    showMessage(`Optimization complete. Processed ${rawData.length} total piece requirements using Best Fit Decreasing (BFD).`, 'success');
+
+                } catch (error) {
+                    console.error('Error processing file:', error);
+                    showMessage(`Error processing file: ${error.message}. Ensure it is a valid .xlsx format.`, 'error');
+                } finally {
+                    showLoading(false);
+                }
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+        
+        function parseAndValidateData(json) {
+            const parsedData = [];
+            for (let i = 1; i < json.length; i++) {
+                const row = json[i];
+                if (row.length < 5) continue;
+
+                const section = String(row[0] || '').trim();
+                const item = String(row[1] || '').trim();
+                const length_mm = parseFloat(String(row[2] || '0').trim());
+                const quantity = parseInt(String(row[3] || '0').trim());
+                const steel = String(row[4] || '').trim();
+
+                const isValid = section.startsWith('L') &&
+                                !isNaN(length_mm) && length_mm > 0 &&
+                                !isNaN(quantity) && quantity > 0 &&
+                                steel.length > 0;
+
+                if (isValid) {
+                    for (let q = 0; q < quantity; q++) {
+                        parsedData.push({
+                            id: `${section}-${steel}-${i}-${q}`,
+                            section: section,
+                            item: item || 'GENERIC',
+                            length: length_mm,
+                            steel: steel
+                        });
+                    }
+                }
+            }
+            return parsedData;
+        }
+
+        // --- CORE OPTIMIZATION LOGIC ---
+
+        function runOptimization(data) {
+            const groups = data.reduce((acc, item) => {
+                const key = `${item.section}|${item.steel}`;
+                if (!acc[key]) {
+                    acc[key] = { 
+                        section: item.section, 
+                        steel: item.steel, 
+                        pieces: [],
+                        weightPerMeter: getWeightPerMeter(item.section)
+                    };
+                }
+                acc[key].pieces.push(item);
+                return acc;
+            }, {});
+
+            const results = {
+                summary: [],
+                detailed: {},
+                scrap: [],
+                overall: { 
+                    netWeight_kg: 0, 
+                    rawMaterialWeight_kg: 0,
+                    totalEfficiency: 0, 
+                    groupCount: 0 
+                }
+            };
+
+            for (const key in groups) {
+                const group = groups[key];
+                const pieces = group.pieces;
+                const totalRequiredLength = pieces.reduce((sum, p) => sum + p.length, 0);
+
+                let optimalPlan;
+                
+                if (selectedOption === 'fixed') {
+                    optimalPlan = findBestFitFixedLength(pieces, FIXED_LENGTH);
+                } else {
+                    optimalPlan = findBestFitMultiLength(pieces);
+                }
+                
+                const totalRawLengthUsed = optimalPlan.rawBars.reduce((sum, bar) => sum + bar.rawLength, 0);
+                
+                const netWeight_kg = (totalRequiredLength / 1000) * group.weightPerMeter;
+                const rawMaterialWeight_kg = (totalRawLengthUsed / 1000) * group.weightPerMeter;
+                const efficiency = rawMaterialWeight_kg > 0 ? (netWeight_kg / rawMaterialWeight_kg) * 100 : 0;
+                
+                const rawLengthCounts = optimalPlan.rawBars.filter(b => b.rawLength > 0).reduce((acc, bar) => {
+                    acc[bar.rawLength] = (acc[bar.rawLength] || 0) + 1;
+                    return acc;
+                }, {});
+
+                const rawLengthsUsedSummary = Object.keys(rawLengthCounts).map(len => ({
+                    length_mm: parseFloat(len),
+                    count: rawLengthCounts[len]
+                })).sort((a, b) => b.length_mm - a.length_mm);
+
+                const totalBarsNeeded = optimalPlan.rawBars.filter(b => b.rawLength > 0).length;
+
+                results.summary.push({
+                    section: group.section,
+                    steel: group.steel,
+                    weightPerMeter: group.weightPerMeter,
+                    rawLengthsUsed: rawLengthsUsedSummary,
+                    rawBarsNeeded: totalBarsNeeded,
+                    netWeight_kg: netWeight_kg,
+                    rawMaterialWeight_kg: rawMaterialWeight_kg,
+                    efficiency: efficiency
+                });
+                
+                results.overall.netWeight_kg += netWeight_kg;
+                results.overall.rawMaterialWeight_kg += rawMaterialWeight_kg;
+                results.overall.totalEfficiency += efficiency;
+                results.overall.groupCount++;
+
+                results.detailed[key] = {
+                    ...optimalPlan,
+                    weightPerMeter: group.weightPerMeter
+                };
+
+                optimalPlan.rawBars.forEach((bar) => {
+                    if (bar.rawLength > 0) {
+                        const scrap = bar.remaining;
+                        if (scrap >= SCRAP_THRESHOLD) {
+                            results.scrap.push({
+                                section: group.section,
+                                steel: group.steel,
+                                scrap_mm: scrap,
+                            });
+                        }
+                    }
+                });
+            }
+            
+            const aggregatedScrap = results.scrap.reduce((acc, item) => {
+                const key = `${item.section}|${item.steel}|${item.scrap_mm.toFixed(0)}`;
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+            }, {});
+
+            results.aggregatedScrap = Object.keys(aggregatedScrap).map(key => {
+                const [section, steel, scrap_mm_str] = key.split('|');
+                const scrap_mm = parseFloat(scrap_mm_str);
+                return {
+                    section: section,
+                    steel: steel,
+                    scrap_mm: scrap_mm,
+                    scrap_m: (scrap_mm / 1000).toFixed(3),
+                    qty: aggregatedScrap[key]
+                };
+            }).sort((a, b) => b.scrap_mm - a.scrap_mm);
+
+            return results;
+        }
+
+        function findBestFitFixedLength(pieces, rawLength) {
+            const result = runSingleLengthPlan_BFD(pieces, rawLength);
+            
+            return {
+                rawBars: result.bars.map(bar => ({
+                    cuts: bar.cuts,
+                    remaining: bar.remaining,
+                    rawLength: rawLength
+                }))
+            };
+        }
+
+        function findBestFitMultiLength(pieces) {
+            let remainingPieces = [...pieces].sort((a, b) => b.length - a.length);
+            const finalRawBars = [];
+            let stockLengthsUsed = new Set();
+            let attempts = 0;
+            const maxAttempts = AVAILABLE_LENGTHS.length * 3;
+            
+            while (remainingPieces.length > 0 && attempts < maxAttempts) {
+                attempts++;
+
+                let bestTrialPlan = null;
+                let bestUtilization = -Infinity;
+
+                for (const trialLength of AVAILABLE_LENGTHS) {
+                    if (stockLengthsUsed.has(trialLength)) continue;
+                    
+                    const trialPlan = runSingleLengthPlan_BFD(remainingPieces, trialLength);
+                    
+                    if (trialPlan.bars.length === 0) continue;
+                    
+                    const totalPlacedLength = trialPlan.bars.flatMap(bar => bar.cuts).reduce((a, b) => a + b.length, 0);
+                    const totalRawLengthUsed = trialPlan.bars.length * trialLength;
+                    
+                    const utilization = totalRawLengthUsed > 0 ? totalPlacedLength / totalRawLengthUsed : 0;
+
+                    if (utilization > bestUtilization) {
+                        bestUtilization = utilization;
+                        bestTrialPlan = { rawLength: trialLength, ...trialPlan };
+                    }
+                }
+
+                if (!bestTrialPlan) {
+                    break;
+                }
+
+                const optimalLength = bestTrialPlan.rawLength;
+                const optimizedBars = bestTrialPlan.bars;
+                
+                stockLengthsUsed.add(optimalLength);
+                
+                const placedCutIds = new Set(optimizedBars.flatMap(bar => bar.cuts).map(p => p.id));
+                remainingPieces = remainingPieces.filter(p => !placedCutIds.has(p.id));
+                
+                optimizedBars.forEach(bar => {
+                    finalRawBars.push({
+                        cuts: bar.cuts,
+                        remaining: bar.remaining,
+                        rawLength: optimalLength
+                    });
+                });
+                
+                if (remainingPieces.length > 0) {
+                    showMessage(`Warning: ${remainingPieces.length} pieces remain unallocated after trying ${stockLengthsUsed.size} different stock lengths.`, 'error');
+                }
+            }
+
+            return {
+                rawBars: finalRawBars,
+            };
+        }
+        
+        function runSingleLengthPlan_BFD(pieces, rawLength) {
+            const sortedPieces = [...pieces].sort((a, b) => b.length - a.length);
+            const bars = [];
+            
+            for (const piece of sortedPieces) {
+                const pieceLength = piece.length;
+                let placed = false;
+                let bestBarIndex = -1;
+                let smallestGap = Infinity;
+
+                for (let i = 0; i < bars.length; i++) {
+                    const bar = bars[i];
+                    if (bar.remaining >= pieceLength) {
+                        const currentGap = bar.remaining - pieceLength;
+                        if (currentGap < smallestGap) {
+                            smallestGap = currentGap;
+                            bestBarIndex = i;
+                        }
+                    }
+                }
+
+                if (bestBarIndex !== -1) {
+                    const bestBar = bars[bestBarIndex];
+                    bestBar.cuts.push(piece);
+                    bestBar.remaining -= pieceLength;
+                    placed = true;
+                }
+                
+                if (!placed) {
+                    if (pieceLength > rawLength) {
+                        continue;
+                    }
+                    bars.push({
+                        cuts: [piece],
+                        remaining: rawLength - pieceLength
+                    });
+                }
+            }
+
+            return { bars: bars };
+        }
+
+        // --- REPORT RENDERING ---
+
+        function formatLength(mm) {
+            if (mm === 0) return 'N/A';
+            return (mm / 1000).toFixed(3) + ' m';
+        }
+
+        function renderReports(plan) {
+            renderOverallSummary(plan.overall);
+            const summaryHTML = generateSummaryTable(plan.summary);
+            document.getElementById('summary-table').innerHTML = summaryHTML;
+            const scrapHTML = generateAggregatedScrapTable(plan.aggregatedScrap);
+            document.getElementById('scrap-table').innerHTML = scrapHTML;
+            const detailHTML = generateDetailedPlan(plan.detailed);
+            document.getElementById('detail-plan').innerHTML = detailHTML;
+        }
+
+        function renderOverallSummary(overall) {
+            const overallEfficiency = overall.rawMaterialWeight_kg > 0 
+                ? (overall.netWeight_kg / overall.rawMaterialWeight_kg * 100).toFixed(2)
+                : '0.00';
+                
+            const avgColor = parseFloat(overallEfficiency) >= 95 ? 'text-green-600' : 'text-orange-600';
+            
+            const netWeightTonne = convertKgToTonneFormatted(overall.netWeight_kg);
+            const rawMaterialWeightTonne = convertKgToTonneFormatted(overall.rawMaterialWeight_kg);
+
+            const html = `
+                <div class="p-4 border border-gray-200 rounded-xl bg-white">
+                    <p class="text-sm font-medium text-gray-500">Net Weight (Required Pieces)</p>
+                    <p class="text-3xl font-extrabold text-primary">${netWeightTonne} t</p>
+                    <p class="text-xs text-gray-500 mt-1">Weight of required cuts only</p>
+                </div>
+                <div class="p-4 border border-gray-200 rounded-xl bg-white">
+                    <p class="text-sm font-medium text-gray-500">Raw Material Weight</p>
+                    <p class="text-3xl font-extrabold text-secondary">${rawMaterialWeightTonne} t</p>
+                    <p class="text-xs text-gray-500 mt-1">Including scrap/waste</p>
+                </div>
+                <div class="p-4 border border-gray-200 rounded-xl bg-white">
+                    <p class="text-sm font-medium text-gray-500">Material Utilization Efficiency</p>
+                    <p class="text-3xl font-extrabold ${avgColor}">${overallEfficiency}%</p>
+                    <p class="text-xs text-gray-500 mt-1">Net Weight ÷ Raw Material Weight</p>
+                </div>
+            `;
+            document.getElementById('overall-summary').innerHTML = html;
+        }
+
+        function generateSummaryTable(summaryData) {
+            if (summaryData.length === 0) return '<p class="text-gray-500">No cutting plan generated.</p>';
+
+            const grandTotals = summaryData.reduce((acc, item) => {
+                acc.totalBars += item.rawBarsNeeded;
+                acc.netWeight_kg += item.netWeight_kg;
+                acc.rawMaterialWeight_kg += item.rawMaterialWeight_kg;
+                return acc;
+            }, { totalBars: 0, netWeight_kg: 0, rawMaterialWeight_kg: 0 });
+
+            const grandEfficiency = grandTotals.rawMaterialWeight_kg > 0 
+                ? (grandTotals.netWeight_kg / grandTotals.rawMaterialWeight_kg * 100).toFixed(2)
+                : '0.00';
+                
+            const avgColor = parseFloat(grandEfficiency) >= 95 ? 'text-green-600' : 'text-orange-600';
+
+            const grandNetWeightTonne = convertKgToTonneFormatted(grandTotals.netWeight_kg);
+            const grandRawMaterialWeightTonne = convertKgToTonneFormatted(grandTotals.rawMaterialWeight_kg);
+
+            let html = `
+                <table class="min-w-full divide-y divide-gray-200 rounded-lg overflow-hidden">
+                    <thead class="bg-primary text-white">
+                        <tr>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Section</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Steel Grade</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Weight/m (kg)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Raw Lengths Used (Qty)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Total Bars</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Net Weight (t)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Raw Material Weight (t)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Efficiency</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+            `;
+
+            summaryData.forEach(item => {
+                const efficiencyColor = item.efficiency >= 95 ? 'text-green-600 font-bold' : 'text-orange-600';
+                const netWeightTonne = convertKgToTonneFormatted(item.netWeight_kg);
+                const rawMaterialWeightTonne = convertKgToTonneFormatted(item.rawMaterialWeight_kg);
+                
+                const lengthsTags = item.rawLengthsUsed.map(l => 
+                    `<span class="raw-length-tag">${formatLength(l.length_mm)} x ${l.count}</span>`
+                ).join(' ');
+
+                html += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.section}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">${item.steel}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-600">${item.weightPerMeter}</td>
+                        <td class="px-3 py-4 text-sm">${lengthsTags}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-secondary">${item.rawBarsNeeded}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-700">${netWeightTonne} t</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-700">${rawMaterialWeightTonne} t</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm ${efficiencyColor}">${item.efficiency.toFixed(2)}%</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody>';
+
+            html += `
+                <tfoot>
+                    <tr class="total-row">
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold" colspan="4">GRAND TOTAL</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-secondary">${grandTotals.totalBars}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-gray-700">${grandNetWeightTonne} t</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-gray-700">${grandRawMaterialWeightTonne} t</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold ${avgColor}">${grandEfficiency}%</td>
+                    </tr>
+                </tfoot>
+            `;
+
+            html += '</table>';
+
+            return html;
+        }
+
+        function generateAggregatedScrapTable(scrapData) {
+            if (scrapData.length === 0) return '<p class="text-gray-500">No valuable scrap (≥ 1.5 m) was generated in this plan.</p>';
+
+            let html = `
+                <table class="min-w-full divide-y divide-gray-200 rounded-lg overflow-hidden">
+                    <thead class="bg-secondary text-white">
+                        <tr>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Section</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Steel Grade</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Scrap Length</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Quantity</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+            `;
+
+            scrapData.forEach(item => {
+                html += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.section}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">${item.steel}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-700">${item.scrap_m} m</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-secondary">${item.qty}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+
+            return html;
+        }
+
+        function generateDetailedPlan(detailedData) {
+            let html = '';
+
+            for (const key in detailedData) {
+                const [section, steel] = key.split('|');
+                const groupPlan = detailedData[key];
+                const weightPerMeter = groupPlan.weightPerMeter;
+                
+                html += `
+                    <div class="border border-gray-200 rounded-lg p-4 bg-white">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-gray-800">${section} - ${steel}</h3>
+                            <div class="text-right">
+                                <span class="text-sm font-medium text-primary">${groupPlan.rawBars.filter(b => b.rawLength > 0).length} bars used</span>
+                                <div class="text-xs text-gray-500">Weight: ${weightPerMeter} kg/m</div>
+                            </div>
+                        </div>
+                `;
+
+                const patternGroups = groupPlan.rawBars.filter(b => b.rawLength > 0).reduce((acc, bar) => {
+                    const patternKey = `${bar.rawLength}|${bar.cuts.map(c => `${c.length}-${c.item}`).join(',')}`;
+                    if (!acc[patternKey]) {
+                        acc[patternKey] = {
+                            rawLength: bar.rawLength,
+                            cuts: bar.cuts,
+                            count: 0,
+                            totalScrap: 0
+                        };
+                    }
+                    acc[patternKey].count++;
+                    acc[patternKey].totalScrap += bar.remaining;
+                    return acc;
+                }, {});
+
+                const patterns = Object.values(patternGroups).sort((a, b) => b.count - a.count);
+
+                if (patterns.length === 0) {
+                    html += '<p class="text-gray-500">No valid cutting patterns generated.</p>';
+                } else {
+                    patterns.forEach((pattern, index) => {
+                        const usedWeight = ((pattern.rawLength - (pattern.totalScrap / pattern.count)) / 1000) * weightPerMeter;
+                        const totalWeight = (pattern.rawLength / 1000) * weightPerMeter;
+                        const efficiency = totalWeight > 0 ? (usedWeight / totalWeight * 100).toFixed(1) : '0.0';
+                        
+                        const efficiencyColor = efficiency >= 95 ? 'text-green-600' : 'text-orange-600';
+                        
+                        html += `
+                            <div class="mb-4 p-3 border border-gray-100 rounded-md bg-gray-50">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="font-medium">Pattern ${index + 1} <span class="text-xs font-normal text-gray-500">(x${pattern.count})</span></span>
+                                    <div class="flex items-center">
+                                        <span class="text-sm font-medium mr-2">Raw: ${formatLength(pattern.rawLength)}</span>
+                                        <span class="text-xs ${efficiencyColor} font-semibold">${efficiency}% eff.</span>
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                        `;
+
+                        const groupedCuts = pattern.cuts.reduce((acc, cut) => {
+                            const key = `${cut.item}-${cut.length}`;
+                            if (!acc[key]) {
+                                acc[key] = {
+                                    item: cut.item,
+                                    length: cut.length,
+                                    count: 0
+                                };
+                            }
+                            acc[key].count++;
+                            return acc;
+                        }, {});
+
+                        Object.values(groupedCuts).forEach(cutGroup => {
+                            html += `
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    ${cutGroup.item} (${formatLength(cutGroup.length)})${cutGroup.count > 1 ? ` ×${cutGroup.count}` : ''}
+                                </span>
+                            `;
+                        });
+
+                        html += `
+                                </div>
+                                <div class="mt-2 text-xs text-gray-500">
+                                    Scrap per bar: ${formatLength(pattern.totalScrap / pattern.count)}
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+
+                html += '</div>';
+            }
+
+            return html;
+        }
+
+        // --- EXPORT FUNCTIONS ---
+
+        function exportToExcel() {
+            try {
+                const wb = XLSX.utils.book_new();
+                
+                // Summary Sheet
+                const summaryData = finalPlan.summary.map(item => ({
+                    'Section': item.section,
+                    'Steel Grade': item.steel,
+                    'Weight per meter (kg/m)': item.weightPerMeter,
+                    'Raw Lengths Used': item.rawLengthsUsed.map(l => `${formatLength(l.length_mm)} x ${l.count}`).join(', '),
+                    'Total Bars': item.rawBarsNeeded,
+                    'Net Weight (t)': convertKgToTonneFormatted(item.netWeight_kg),
+                    'Raw Material Weight (t)': convertKgToTonneFormatted(item.rawMaterialWeight_kg),
+                    'Efficiency (%)': item.efficiency.toFixed(2)
+                }));
+                
+                const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+                XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+                
+                // Scrap Sheet
+                const scrapData = finalPlan.aggregatedScrap.map(item => ({
+                    'Section': item.section,
+                    'Steel Grade': item.steel,
+                    'Scrap Length (m)': item.scrap_m,
+                    'Quantity': item.qty
+                }));
+                
+                const scrapWs = XLSX.utils.json_to_sheet(scrapData);
+                XLSX.utils.book_append_sheet(wb, scrapWs, 'Scrap Report');
+                
+                // Detailed Plan Sheet - AGGREGATED BY PATTERN
+                let detailedData = [];
+                
+                for (const key in finalPlan.detailed) {
+                    const [section, steel] = key.split('|');
+                    const groupPlan = finalPlan.detailed[key];
+                    const weightPerMeter = groupPlan.weightPerMeter;
+                    
+                    // Group bars by pattern (same raw length and same cuts)
+                    const patternGroups = groupPlan.rawBars.filter(b => b.rawLength > 0).reduce((acc, bar) => {
+                        const patternKey = `${bar.rawLength}|${bar.cuts.map(c => `${c.length}-${c.item}`).join(',')}`;
+                        if (!acc[patternKey]) {
+                            acc[patternKey] = {
+                                rawLength: bar.rawLength,
+                                cuts: bar.cuts,
+                                count: 0,
+                                totalScrap: 0
+                            };
+                        }
+                        acc[patternKey].count++;
+                        acc[patternKey].totalScrap += bar.remaining;
+                        return acc;
+                    }, {});
+
+                    // Convert to array and sort by count (descending)
+                    const patterns = Object.values(patternGroups).sort((a, b) => b.count - a.count);
+
+                    patterns.forEach((pattern, patternIndex) => {
+                        // Calculate efficiency for this pattern
+                        const usedWeight = ((pattern.rawLength - (pattern.totalScrap / pattern.count)) / 1000) * weightPerMeter;
+                        const totalWeight = (pattern.rawLength / 1000) * weightPerMeter;
+                        const efficiency = totalWeight > 0 ? (usedWeight / totalWeight * 100).toFixed(1) : '0.0';
+                        
+                        // Group cuts by item and length
+                        const groupedCuts = pattern.cuts.reduce((acc, cut) => {
+                            const key = `${cut.item}-${cut.length}`;
+                            if (!acc[key]) {
+                                acc[key] = {
+                                    item: cut.item,
+                                    length: cut.length,
+                                    count: 0
+                                };
+                            }
+                            acc[key].count++;
+                            return acc;
+                        }, {});
+
+                        // Create cuts description
+                        const cutsDescription = Object.values(groupedCuts).map(cut => 
+                            `${cut.item} (${formatLength(cut.length)})${cut.count > 1 ? ` ×${cut.count}` : ''}`
+                        ).join(', ');
+
+                        detailedData.push({
+                            'Section': section,
+                            'Steel Grade': steel,
+                            'Pattern #': patternIndex + 1,
+                            'Quantity': pattern.count,
+                            'Raw Material Length (m)': formatLength(pattern.rawLength),
+                            'Cuts Description': cutsDescription,
+                            'Scrap per Bar (m)': formatLength(pattern.totalScrap / pattern.count),
+                            'Efficiency (%)': efficiency + '%',
+                            'Weight per meter (kg/m)': weightPerMeter
+                        });
+                    });
+                }
+                
+                const detailedWs = XLSX.utils.json_to_sheet(detailedData);
+                XLSX.utils.book_append_sheet(wb, detailedWs, 'Detailed Plan (Aggregated)');
+                
+                XLSX.writeFile(wb, 'Cutting_Optimization_Plan.xlsx');
+                showMessage('Excel file exported successfully!', 'success');
+            } catch (error) {
+                console.error('Error exporting to Excel:', error);
+                showMessage('Error exporting to Excel: ' + error.message, 'error');
+            }
+        }
+
+        function exportToPDF() {
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                doc.setFontSize(16);
+                doc.text('Cutting Optimization Plan', 20, 20);
+                doc.setFontSize(12);
+                doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 20, 30);
+                doc.text(`Raw Material Option: ${selectedOption === 'fixed' ? 'Fixed 12M Length' : 'Variable Lengths (Optimized)'}`, 20, 40);
+                
+                // Overall Optimization Summary
+                doc.setFontSize(14);
+                doc.text('3. Overall Optimization Summary', 20, 60);
+                
+                const overallEfficiency = finalPlan.overall.rawMaterialWeight_kg > 0 
+                    ? (finalPlan.overall.netWeight_kg / finalPlan.overall.rawMaterialWeight_kg * 100).toFixed(2)
+                    : '0.00';
+                
+                const netWeightTonne = convertKgToTonneFormatted(finalPlan.overall.netWeight_kg);
+                const rawMaterialWeightTonne = convertKgToTonneFormatted(finalPlan.overall.rawMaterialWeight_kg);
+                
+                doc.autoTable({
+                    startY: 70,
+                    head: [['Metric', 'Value']],
+                    body: [
+                        ['Net Weight (Required Pieces)', `${netWeightTonne} t`],
+                        ['Raw Material Weight (Including scrap)', `${rawMaterialWeightTonne} t`],
+                        ['Material Utilization Efficiency', `${overallEfficiency}%`]
+                    ],
+                    theme: 'grid',
+                    headStyles: { fillColor: [5, 150, 105] },
+                    styles: { fontSize: 11 }
+                });
+                
+                // Cutting Plan Details by Material Group
+                doc.addPage();
+                doc.setFontSize(14);
+                doc.text('3.1. Cutting Plan Details by Material Group', 20, 20);
+                
+                let tableData = [];
+                
+                finalPlan.summary.forEach(item => {
+                    tableData.push([
+                        item.section,
+                        item.steel,
+                        item.weightPerMeter.toString(),
+                        item.rawBarsNeeded.toString(),
+                        convertKgToTonneFormatted(item.netWeight_kg),
+                        convertKgToTonneFormatted(item.rawMaterialWeight_kg),
+                        item.efficiency.toFixed(2) + '%'
+                    ]);
+                    
+                    item.rawLengthsUsed.forEach(lengthInfo => {
+                        tableData.push([
+                            '',
+                            '',
+                            `→ ${formatLength(lengthInfo.length_mm)}`,
+                            `× ${lengthInfo.count}`,
+                            '',
+                            '',
+                            ''
+                        ]);
+                    });
+                    
+                    tableData.push(['', '', '', '', '', '', '']);
+                });
+                
+                if (tableData.length > 0) {
+                    tableData.pop();
+                }
+                
+                doc.autoTable({
+                    startY: 30,
+                    head: [['Section', 'Steel Grade', 'Weight/m (kg)', 'Total Bars', 'Net Weight (t)', 'Raw Material Weight (t)', 'Efficiency']],
+                    body: tableData,
+                    theme: 'grid',
+                    headStyles: { fillColor: [59, 130, 246] },
+                    styles: { fontSize: 10 },
+                    columnStyles: {
+                        0: { cellWidth: 25 },
+                        1: { cellWidth: 25 },
+                        2: { cellWidth: 25 },
+                        3: { cellWidth: 20 },
+                        4: { cellWidth: 25 },
+                        5: { cellWidth: 30 },
+                        6: { cellWidth: 20 }
+                    }
+                });
+                
+                // Valuable Scrap Report
+                if (finalPlan.aggregatedScrap.length > 0) {
+                    doc.addPage();
+                    doc.setFontSize(14);
+                    doc.text('4. Valuable Scrap Report (≥ 1.5 m)', 20, 20);
+                    
+                    doc.autoTable({
+                        startY: 30,
+                        head: [['Section', 'Steel Grade', 'Scrap Length (m)', 'Quantity']],
+                        body: finalPlan.aggregatedScrap.map(item => [
+                            item.section,
+                            item.steel,
+                            item.scrap_m,
+                            item.qty.toString()
+                        ]),
+                        theme: 'grid',
+                        headStyles: { fillColor: [255, 87, 51] }
+                    });
+                }
+                
+                doc.save('Cutting_Optimization_Plan.pdf');
+                showMessage('PDF file exported successfully!', 'success');
+            } catch (error) {
+                console.error('Error exporting to PDF:', error);
+                showMessage('Error exporting to PDF: ' + error.message, 'error');
+            }
+        }
+
+        // Initialize the UI with the default selection
+        document.addEventListener('DOMContentLoaded', function() {
+            selectOption('fixed');
+        });
+    </script>
+</body>
+</html>
