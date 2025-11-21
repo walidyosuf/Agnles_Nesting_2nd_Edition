@@ -117,6 +117,43 @@
         .modification-item:hover {
             background-color: #f3f4f6;
         }
+        .pattern-item {
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        .pattern-header {
+            background-color: #f8fafc;
+            padding: 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            cursor: pointer;
+        }
+        .pattern-content {
+            padding: 1rem;
+            background-color: white;
+        }
+        .pattern-cuts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .cut-badge {
+            background-color: #dbeafe;
+            color: #1e40af;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .scrap-row {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .scrap-row:hover {
+            background-color: #f3f4f6;
+        }
     </style>
     <!-- Essential Libraries for Excel/PDF Handling -->
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
@@ -206,6 +243,13 @@
                         </svg>
                         Modify Raw Material Lengths
                     </button>
+                    <!-- New button for pattern length modification -->
+                    <button onclick="showPatternModificationModal()" class="flex items-center px-4 py-2 bg-purple-600 text-white rounded-full font-medium hover:bg-purple-700 transition duration-150">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
+                        </svg>
+                        Modify Pattern Lengths
+                    </button>
                 </div>
             </div>
         </div>
@@ -222,8 +266,8 @@
             </div>
             <!-- Scrap Report -->
             <div class="card bg-white p-6 rounded-xl mb-8 border border-gray-200">
-                <h2 class="text-2xl font-semibold mb-4 text-secondary">4. Valuable Scrap Report (≥ 1.5 m)</h2>
-                <p class="text-sm text-gray-600 mb-4">Aggregated by identical length for easy inventory.</p>
+                <h2 class="text-2xl font-semibold mb-4 text-secondary">4. Valuable Scrap Report (≥ 0.1 m)</h2>
+                <p class="text-sm text-gray-600 mb-4">Aggregated by identical length for easy inventory. Click on any scrap item to modify its length.</p>
                 <div id="scrap-table" class="table-container"></div>
             </div>
             <!-- Detailed Plan -->
@@ -310,11 +354,146 @@
         </div>
     </div>
     
+    <!-- New Modal for Pattern Length Modification -->
+    <div id="pattern-modification-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="text-2xl font-bold text-gray-800">Modify Pattern Lengths</h3>
+                <button onclick="hidePatternModificationModal()" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-6">
+                    <p class="text-sm text-gray-600 mb-4">
+                        Modify the raw material length for individual cutting patterns to optimize efficiency.
+                        Each pattern represents a unique combination of cuts.
+                    </p>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Select Section</label>
+                        <select id="pattern-section-select" class="w-full p-2 border border-gray-300 rounded-md" onchange="updatePatternSteelOptions()">
+                            <option value="">-- Select Section --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Select Steel Grade</label>
+                        <select id="pattern-steel-select" class="w-full p-2 border border-gray-300 rounded-md" onchange="updatePatternList()">
+                            <option value="">-- Select Grade --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Filter by Current Length</label>
+                        <select id="pattern-length-filter" class="w-full p-2 border border-gray-300 rounded-md" onchange="updatePatternList()">
+                            <option value="">-- All Lengths --</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <h4 class="text-lg font-semibold mb-2 text-gray-800">Available Patterns:</h4>
+                    <div id="patterns-list" class="space-y-4 max-h-96 overflow-y-auto">
+                        <p class="text-gray-500 text-center py-4">Select section and steel grade to view patterns</p>
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <h4 class="text-lg font-semibold mb-2 text-gray-800">Pattern Modifications:</h4>
+                    <div id="pattern-modifications-list" class="border border-gray-200 rounded-lg p-4 max-h-60 overflow-y-auto">
+                        <p class="text-gray-500 text-center py-4">No pattern modifications added yet</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="applyPatternModifications()" class="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 transition font-medium">
+                    Apply Pattern Modifications
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- New Modal for Scrap Length Modification -->
+    <div id="scrap-modification-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="text-2xl font-bold text-gray-800">Modify Scrap Length</h3>
+                <button onclick="hideScrapModificationModal()" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-6">
+                    <p class="text-sm text-gray-600 mb-4">
+                        Modify the scrap length and the system will automatically adjust the raw material length accordingly.
+                    </p>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Section</label>
+                        <input type="text" id="scrap-section" class="w-full p-2 border border-gray-300 rounded-md" readonly>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Steel Grade</label>
+                        <input type="text" id="scrap-steel" class="w-full p-2 border border-gray-300 rounded-md" readonly>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Current Scrap Length (mm)</label>
+                        <input type="text" id="current-scrap-length" class="w-full p-2 border border-gray-300 rounded-md" readonly>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Current Raw Material Length (mm)</label>
+                        <input type="text" id="current-raw-length-scrap" class="w-full p-2 border border-gray-300 rounded-md" readonly>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">New Scrap Length (mm)</label>
+                        <select id="new-scrap-length" class="w-full p-2 border border-gray-300 rounded-md">
+                            <option value="">-- Select Length --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Calculated Raw Material Length (mm)</label>
+                        <input type="text" id="calculated-raw-length" class="w-full p-2 border border-gray-300 rounded-md" readonly>
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <div id="scrap-efficiency-warning" class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm hidden">
+                        Warning: This modification may negatively affect usage efficiency
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <p class="text-xs text-gray-500 mt-1">
+                        Note: Modifying scrap length will automatically adjust the raw material length to maintain the same cutting pattern.
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="applyScrapModification()" class="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 transition font-medium">
+                    Apply Scrap Modification
+                </button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         // --- CONSTANTS ---
         const MIN_RAW_LENGTH = 6000; // 6 meters in mm
         const MAX_RAW_LENGTH = 13000; // 13 meters in mm
-        const SCRAP_THRESHOLD = 1500; // 1.5 meters in mm
+        const SCRAP_THRESHOLD = 100; // 0.1 meters in mm (تم التغيير من 1500 إلى 100)
         const LENGTH_INCREMENT = 100; // 10 cm increment
         // Generate Available Raw Material Lengths with 10cm increments
         const AVAILABLE_LENGTHS = [];
@@ -541,6 +720,10 @@
         let selectedOption = 'fixed';
         // Array to store raw material length modifications
         let modificationsList = [];
+        // Array to store pattern length modifications
+        let patternModificationsList = [];
+        // Variable to store current scrap item being modified
+        let currentScrapItem = null;
         
         // --- UI UTILITIES ---
         const fileInput = document.getElementById('excel-file');
@@ -601,7 +784,599 @@
             calculateBtn.disabled = show;
         }
         
-        // --- MODIFICATION FEATURES FOR RAW MATERIAL LENGTHS ---
+        // --- NEW SCRAP MODIFICATION FEATURES ---
+        
+        // Show scrap modification modal
+        function showScrapModificationModal(scrapItem) {
+            currentScrapItem = scrapItem;
+            document.getElementById('scrap-modification-modal').classList.remove('hidden');
+            
+            // Populate the modal with scrap item data
+            document.getElementById('scrap-section').value = scrapItem.section;
+            document.getElementById('scrap-steel').value = scrapItem.steel;
+            document.getElementById('current-scrap-length').value = `${scrapItem.scrap_mm} mm (${(scrapItem.scrap_mm / 1000).toFixed(3)} m)`;
+            
+            // Find the corresponding raw material length
+            const rawLength = findRawLengthForScrap(scrapItem);
+            document.getElementById('current-raw-length-scrap').value = `${rawLength} mm (${(rawLength / 1000).toFixed(3)} m)`;
+            
+            // Populate new scrap length options
+            const newScrapLengthSelect = document.getElementById('new-scrap-length');
+            newScrapLengthSelect.innerHTML = '<option value="">-- Select Length --</option>';
+            
+            // Add available scrap lengths (from 100mm to rawLength - 100mm)
+            for (let length = SCRAP_THRESHOLD; length <= rawLength - 100; length += LENGTH_INCREMENT) {
+                const option = document.createElement('option');
+                option.value = length;
+                option.textContent = `${length} mm (${(length / 1000).toFixed(3)} m)`;
+                if (length === scrapItem.scrap_mm) {
+                    option.selected = true;
+                }
+                newScrapLengthSelect.appendChild(option);
+            }
+            
+            // Add change event listener to update calculated raw length
+            newScrapLengthSelect.addEventListener('change', updateCalculatedRawLength);
+            
+            // Initialize calculated raw length
+            updateCalculatedRawLength();
+        }
+        
+        // Hide scrap modification modal
+        function hideScrapModificationModal() {
+            document.getElementById('scrap-modification-modal').classList.add('hidden');
+            currentScrapItem = null;
+        }
+        
+        // Find the raw material length that produced this scrap
+        function findRawLengthForScrap(scrapItem) {
+            const key = `${scrapItem.section}|${scrapItem.steel}`;
+            if (finalPlan.detailed[key]) {
+                const group = finalPlan.detailed[key];
+                
+                // Find a bar that matches this scrap length
+                for (const bar of group.rawBars) {
+                    if (bar.remaining === scrapItem.scrap_mm) {
+                        return bar.rawLength;
+                    }
+                }
+                
+                // If exact match not found, find the closest
+                let closestRawLength = 0;
+                for (const bar of group.rawBars) {
+                    if (bar.remaining >= SCRAP_THRESHOLD) {
+                        closestRawLength = bar.rawLength;
+                        break;
+                    }
+                }
+                
+                return closestRawLength || 12000; // Default to 12m if not found
+            }
+            return 12000; // Default to 12m if not found
+        }
+        
+        // Update calculated raw length based on new scrap length
+        function updateCalculatedRawLength() {
+            const newScrapLengthSelect = document.getElementById('new-scrap-length');
+            const calculatedRawLengthInput = document.getElementById('calculated-raw-length');
+            const efficiencyWarning = document.getElementById('scrap-efficiency-warning');
+            
+            if (!newScrapLengthSelect.value) {
+                calculatedRawLengthInput.value = '';
+                efficiencyWarning.classList.add('hidden');
+                return;
+            }
+            
+            const newScrapLength = parseInt(newScrapLengthSelect.value);
+            const currentRawLength = parseInt(document.getElementById('current-raw-length-scrap').value.split(' ')[0]);
+            
+            // Calculate the new raw length based on the pattern
+            const key = `${currentScrapItem.section}|${currentScrapItem.steel}`;
+            if (finalPlan.detailed[key]) {
+                const group = finalPlan.detailed[key];
+                
+                // Find the pattern that produced this scrap
+                for (const bar of group.rawBars) {
+                    if (bar.remaining === currentScrapItem.scrap_mm) {
+                        const totalCutsLength = bar.rawLength - bar.remaining;
+                        const newRawLength = totalCutsLength + newScrapLength;
+                        
+                        // Find the closest available raw length
+                        let closestRawLength = AVAILABLE_LENGTHS[0];
+                        for (const length of AVAILABLE_LENGTHS) {
+                            if (length >= newRawLength) {
+                                closestRawLength = length;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        calculatedRawLengthInput.value = `${closestRawLength} mm (${(closestRawLength / 1000).toFixed(3)} m)`;
+                        
+                        // Show efficiency warning if the new raw length is significantly different
+                        const efficiencyChange = Math.abs(closestRawLength - currentRawLength) / currentRawLength;
+                        if (efficiencyChange > 0.1) { // More than 10% change
+                            efficiencyWarning.classList.remove('hidden');
+                            efficiencyWarning.textContent = `Warning: This modification will change raw material length by ${(efficiencyChange * 100).toFixed(1)}%, which may affect efficiency.`;
+                        } else {
+                            efficiencyWarning.classList.add('hidden');
+                        }
+                        
+                        return;
+                    }
+                }
+            }
+            
+            // Fallback calculation
+            const currentRawLengthNum = parseInt(document.getElementById('current-raw-length-scrap').value.split(' ')[0]);
+            const totalCutsLength = currentRawLengthNum - currentScrapItem.scrap_mm;
+            const newRawLength = totalCutsLength + newScrapLength;
+            
+            // Find the closest available raw length
+            let closestRawLength = AVAILABLE_LENGTHS[0];
+            for (const length of AVAILABLE_LENGTHS) {
+                if (length >= newRawLength) {
+                    closestRawLength = length;
+                } else {
+                    break;
+                }
+            }
+            
+            calculatedRawLengthInput.value = `${closestRawLength} mm (${(closestRawLength / 1000).toFixed(3)} m)`;
+            
+            // Show efficiency warning
+            const efficiencyChange = Math.abs(closestRawLength - currentRawLengthNum) / currentRawLengthNum;
+            if (efficiencyChange > 0.1) {
+                efficiencyWarning.classList.remove('hidden');
+                efficiencyWarning.textContent = `Warning: This modification will change raw material length by ${(efficiencyChange * 100).toFixed(1)}%, which may affect efficiency.`;
+            } else {
+                efficiencyWarning.classList.add('hidden');
+            }
+        }
+        
+        // Apply scrap modification - تم تصحيح الخطأ هنا
+        function applyScrapModification() {
+            const newScrapLengthSelect = document.getElementById('new-scrap-length');
+            
+            if (!newScrapLengthSelect.value) {
+                showMessage('Please select a new scrap length.', 'error');
+                return;
+            }
+            
+            const newScrapLength = parseInt(newScrapLengthSelect.value);
+            const calculatedRawLength = parseInt(document.getElementById('calculated-raw-length').value.split(' ')[0]);
+            
+            showLoading(true);
+            
+            setTimeout(() => {
+                try {
+                    // Clone current cutting plan
+                    const modifiedPlan = JSON.parse(JSON.stringify(finalPlan));
+                    
+                    // تعريف barsUpdated في النطاق الصحيح
+                    let barsUpdated = 0;
+                    
+                    // Apply the scrap modification
+                    const key = `${currentScrapItem.section}|${currentScrapItem.steel}`;
+                    if (modifiedPlan.detailed[key]) {
+                        const group = modifiedPlan.detailed[key];
+                        
+                        // Find and update bars that match the scrap pattern
+                        for (const bar of group.rawBars) {
+                            if (bar.remaining === currentScrapItem.scrap_mm && bar.rawLength === parseInt(document.getElementById('current-raw-length-scrap').value.split(' ')[0])) {
+                                // Calculate the total cuts length
+                                const totalCutsLength = bar.rawLength - bar.remaining;
+                                
+                                // Update the bar with new lengths
+                                bar.rawLength = calculatedRawLength;
+                                bar.remaining = newScrapLength;
+                                
+                                barsUpdated++;
+                                
+                                // Stop after updating the required number of bars
+                                if (barsUpdated >= currentScrapItem.qty) {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // التحقق مما إذا تم تحديث أي أعمدة
+                    if (barsUpdated === 0) {
+                        showMessage('Could not find matching bars to update. The cutting plan may have changed.', 'error');
+                        showLoading(false);
+                        return;
+                    }
+                    
+                    // Recalculate statistics
+                    recalculatePlanStatistics(modifiedPlan);
+                    
+                    // Update displayed results
+                    renderReports(modifiedPlan);
+                    
+                    // Save modified plan
+                    finalPlan = modifiedPlan;
+                    
+                    hideScrapModificationModal();
+                    showMessage(`Scrap modification applied successfully. Updated ${barsUpdated} bars.`, 'success');
+                } catch (error) {
+                    console.error('Error applying scrap modification:', error);
+                    showMessage('Error applying scrap modification: ' + error.message, 'error');
+                } finally {
+                    showLoading(false);
+                }
+            }, 500);
+        }
+
+        // --- EXISTING PATTERN MODIFICATION FEATURES ---
+        
+        // Show pattern modification modal
+        function showPatternModificationModal() {
+            document.getElementById('pattern-modification-modal').classList.remove('hidden');
+            populatePatternSections();
+        }
+        
+        // Hide pattern modification modal
+        function hidePatternModificationModal() {
+            document.getElementById('pattern-modification-modal').classList.add('hidden');
+        }
+        
+        // Populate section options for pattern modification
+        function populatePatternSections() {
+            const sectionSelect = document.getElementById('pattern-section-select');
+            sectionSelect.innerHTML = '<option value="">-- Select Section --</option>';
+            
+            if (!finalPlan || !finalPlan.detailed) return;
+            
+            // Collect all unique sections used in the plan
+            const sections = new Set();
+            for (const key in finalPlan.detailed) {
+                const [section] = key.split('|');
+                sections.add(section);
+            }
+            
+            // Convert to array and sort
+            const sortedSections = Array.from(sections).sort();
+            
+            sortedSections.forEach(section => {
+                const option = document.createElement('option');
+                option.value = section;
+                option.textContent = section;
+                sectionSelect.appendChild(option);
+            });
+        }
+        
+        // Update steel grade options for pattern modification
+        function updatePatternSteelOptions() {
+            const sectionSelect = document.getElementById('pattern-section-select');
+            const steelSelect = document.getElementById('pattern-steel-select');
+            const lengthFilter = document.getElementById('pattern-length-filter');
+            const section = sectionSelect.value;
+            
+            steelSelect.innerHTML = '<option value="">-- Select Grade --</option>';
+            lengthFilter.innerHTML = '<option value="">-- All Lengths --</option>';
+            
+            if (!section) return;
+            
+            // Collect unique steel grades for this section
+            const steels = new Set();
+            for (const key in finalPlan.detailed) {
+                const [keySection, steel] = key.split('|');
+                if (keySection === section) {
+                    steels.add(steel);
+                }
+            }
+            
+            // Convert to array and sort
+            const sortedSteels = Array.from(steels).sort();
+            
+            sortedSteels.forEach(steel => {
+                const option = document.createElement('option');
+                option.value = steel;
+                option.textContent = steel;
+                steelSelect.appendChild(option);
+            });
+            
+            updatePatternList();
+        }
+        
+        // Update pattern list based on selected section and steel
+        function updatePatternList() {
+            const sectionSelect = document.getElementById('pattern-section-select');
+            const steelSelect = document.getElementById('pattern-steel-select');
+            const lengthFilter = document.getElementById('pattern-length-filter');
+            const patternsList = document.getElementById('patterns-list');
+            
+            const section = sectionSelect.value;
+            const steel = steelSelect.value;
+            
+            patternsList.innerHTML = '<p class="text-gray-500 text-center py-4">Select section and steel grade to view patterns</p>';
+            
+            if (!section || !steel) return;
+            
+            const key = `${section}|${steel}`;
+            const groupPlan = finalPlan.detailed[key];
+            
+            if (!groupPlan) return;
+            
+            // Get all unique raw lengths used in this group
+            const rawLengths = new Set();
+            groupPlan.rawBars.forEach(bar => {
+                if (bar.rawLength > 0) {
+                    rawLengths.add(bar.rawLength);
+                }
+            });
+            
+            // Update length filter
+            lengthFilter.innerHTML = '<option value="">-- All Lengths --</option>';
+            const sortedLengths = Array.from(rawLengths).sort((a, b) => a - b);
+            sortedLengths.forEach(length => {
+                const option = document.createElement('option');
+                option.value = length;
+                option.textContent = `${(length / 1000).toFixed(3)} m`;
+                lengthFilter.appendChild(option);
+            });
+            
+            // Group bars by pattern (same raw length and same cuts)
+            const patternGroups = groupPlan.rawBars.filter(b => b.rawLength > 0).reduce((acc, bar) => {
+                const patternKey = `${bar.rawLength}|${bar.cuts.map(c => `${c.length}-${c.item}`).join(',')}`;
+                if (!acc[patternKey]) {
+                    acc[patternKey] = {
+                        rawLength: bar.rawLength,
+                        cuts: bar.cuts,
+                        count: 0,
+                        totalScrap: 0,
+                        patternKey: patternKey
+                    };
+                }
+                acc[patternKey].count++;
+                acc[patternKey].totalScrap += bar.remaining;
+                return acc;
+            }, {});
+            
+            // Convert to array and sort by count (descending)
+            const patterns = Object.values(patternGroups).sort((a, b) => b.count - a.count);
+            
+            // Filter by selected length if any
+            const selectedLength = lengthFilter.value ? parseInt(lengthFilter.value) : null;
+            const filteredPatterns = selectedLength 
+                ? patterns.filter(p => p.rawLength === selectedLength)
+                : patterns;
+            
+            if (filteredPatterns.length === 0) {
+                patternsList.innerHTML = '<p class="text-gray-500 text-center py-4">No patterns found for the selected criteria</p>';
+                return;
+            }
+            
+            let html = '';
+            filteredPatterns.forEach((pattern, index) => {
+                const totalCutsLength = pattern.cuts.reduce((sum, cut) => sum + cut.length, 0);
+                const avgScrap = pattern.totalScrap / pattern.count;
+                const efficiency = ((totalCutsLength / pattern.rawLength) * 100).toFixed(1);
+                const weightPerMeter = groupPlan.weightPerMeter;
+                const totalWeight = (totalCutsLength / 1000) * weightPerMeter * pattern.count;
+                
+                html += `
+                    <div class="pattern-item">
+                        <div class="pattern-header" onclick="togglePatternDetails('${pattern.patternKey}')">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <span class="font-medium">Pattern ${index + 1}</span>
+                                    <span class="text-sm text-gray-500 ml-2">(x${pattern.count})</span>
+                                </div>
+                                <div class="flex items-center space-x-4">
+                                    <span class="text-sm font-medium">Raw: ${formatLength(pattern.rawLength)}</span>
+                                    <span class="text-sm ${efficiency >= 95 ? 'text-green-600' : 'text-orange-600'} font-semibold">${efficiency}% eff.</span>
+                                    <span class="text-sm font-medium">Weight: ${totalWeight.toFixed(2)} kg</span>
+                                    <button onclick="event.stopPropagation(); addPatternModification('${section}', '${steel}', '${pattern.patternKey}', ${pattern.rawLength})" 
+                                            class="text-xs bg-purple-500 text-white px-2 py-1 rounded hover:bg-purple-600 transition">
+                                        Modify Length
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="pattern-${pattern.patternKey}" class="pattern-content hidden">
+                            <div class="pattern-cuts">
+                                ${pattern.cuts.map(cut => `
+                                    <span class="cut-badge">${cut.item} (${formatLength(cut.length)})</span>
+                                `).join('')}
+                            </div>
+                            <div class="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                    <span class="font-medium">Total Cuts Length:</span> ${formatLength(totalCutsLength)}
+                                </div>
+                                <div>
+                                    <span class="font-medium">Average Scrap:</span> ${formatLength(avgScrap)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            patternsList.innerHTML = html;
+        }
+        
+        // Toggle pattern details visibility
+        function togglePatternDetails(patternKey) {
+            const patternContent = document.getElementById(`pattern-${patternKey}`);
+            patternContent.classList.toggle('hidden');
+        }
+        
+        // Add pattern modification to the list
+        function addPatternModification(section, steel, patternKey, currentLength) {
+            const newLengthSelect = document.createElement('select');
+            newLengthSelect.className = 'w-full p-2 border border-gray-300 rounded-md';
+            
+            // Add available lengths
+            AVAILABLE_LENGTHS.forEach(length => {
+                const option = document.createElement('option');
+                option.value = length;
+                option.textContent = `${(length / 1000).toFixed(3)} m`;
+                if (length === currentLength) {
+                    option.selected = true;
+                    option.disabled = true;
+                    option.textContent += ' (current)';
+                }
+                newLengthSelect.appendChild(option);
+            });
+            
+            // Create modification item
+            const modification = {
+                section: section,
+                steel: steel,
+                patternKey: patternKey,
+                currentLength: currentLength,
+                newLength: currentLength // Default to current length
+            };
+            
+            // Update newLength when selection changes
+            newLengthSelect.addEventListener('change', function() {
+                modification.newLength = parseInt(this.value);
+            });
+            
+            patternModificationsList.push(modification);
+            renderPatternModificationsList();
+            
+            showMessage('Pattern modification added to the list.', 'success');
+        }
+        
+        // Render pattern modifications list
+        function renderPatternModificationsList() {
+            const listContainer = document.getElementById('pattern-modifications-list');
+            
+            if (patternModificationsList.length === 0) {
+                listContainer.innerHTML = '<p class="text-gray-500 text-center py-4">No pattern modifications added yet</p>';
+                return;
+            }
+            
+            let html = '<div class="space-y-2">';
+            
+            patternModificationsList.forEach((mod, index) => {
+                const currentLengthM = (mod.currentLength / 1000).toFixed(3);
+                const newLengthM = (mod.newLength / 1000).toFixed(3);
+                
+                html += `
+                    <div class="modification-item">
+                        <div class="flex-1">
+                            <div class="font-medium">${mod.section} | ${mod.steel}</div>
+                            <div class="text-sm text-gray-500">Pattern: ${mod.patternKey.split('|')[1].substring(0, 30)}...</div>
+                            <div class="text-xs text-gray-500 mt-1">
+                                Current: ${currentLengthM} m → New: 
+                                <select class="text-xs p-1 border border-gray-300 rounded" onchange="updatePatternModificationLength(${index}, this.value)">
+                                    ${AVAILABLE_LENGTHS.map(length => `
+                                        <option value="${length}" ${length === mod.newLength ? 'selected' : ''}>
+                                            ${(length / 1000).toFixed(3)} m
+                                        </option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <button onclick="removePatternModification(${index})" class="text-red-500 hover:text-red-700 ml-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            listContainer.innerHTML = html;
+        }
+        
+        // Update pattern modification length
+        function updatePatternModificationLength(index, newLength) {
+            patternModificationsList[index].newLength = parseInt(newLength);
+        }
+        
+        // Remove pattern modification from the list
+        function removePatternModification(index) {
+            patternModificationsList.splice(index, 1);
+            renderPatternModificationsList();
+        }
+        
+        // Apply pattern modifications with complete reoptimization
+        function applyPatternModifications() {
+            if (patternModificationsList.length === 0) {
+                showMessage('No pattern modifications to apply. Please add modifications first.', 'error');
+                return;
+            }
+            
+            showLoading(true);
+            
+            setTimeout(() => {
+                try {
+                    // Clone current cutting plan
+                    const modifiedPlan = JSON.parse(JSON.stringify(finalPlan));
+                    
+                    // Apply each pattern modification
+                    patternModificationsList.forEach(mod => {
+                        const key = `${mod.section}|${mod.steel}`;
+                        
+                        if (modifiedPlan.detailed[key]) {
+                            const group = modifiedPlan.detailed[key];
+                            const weightPerMeter = group.weightPerMeter;
+                            
+                            // Find all bars that match the pattern
+                            const barsToUpdate = group.rawBars.filter(bar => {
+                                const barPatternKey = `${bar.rawLength}|${bar.cuts.map(c => `${c.length}-${c.item}`).join(',')}`;
+                                return barPatternKey === mod.patternKey && bar.rawLength === mod.currentLength;
+                            });
+                            
+                            // If we have bars to update
+                            if (barsToUpdate.length > 0) {
+                                // Extract all cuts from these bars
+                                const allCuts = [];
+                                barsToUpdate.forEach(bar => {
+                                    allCuts.push(...bar.cuts);
+                                });
+                                
+                                // Reoptimize these cuts with the new length using BFD algorithm
+                                const reoptimizedBars = runSingleLengthPlan_BFD(allCuts, mod.newLength);
+                                
+                                // Replace the old bars with the reoptimized ones
+                                // First, remove the old bars
+                                group.rawBars = group.rawBars.filter(bar => {
+                                    const barPatternKey = `${bar.rawLength}|${bar.cuts.map(c => `${c.length}-${c.item}`).join(',')}`;
+                                    return !(barPatternKey === mod.patternKey && bar.rawLength === mod.currentLength);
+                                });
+                                
+                                // Then, add the reoptimized bars with the new length
+                                reoptimizedBars.bars.forEach(bar => {
+                                    group.rawBars.push({
+                                        cuts: bar.cuts,
+                                        remaining: bar.remaining,
+                                        rawLength: mod.newLength
+                                    });
+                                });
+                            }
+                        }
+                    });
+                    
+                    // Recalculate statistics
+                    recalculatePlanStatistics(modifiedPlan);
+                    
+                    // Update displayed results
+                    renderReports(modifiedPlan);
+                    
+                    // Save modified plan
+                    finalPlan = modifiedPlan;
+                    patternModificationsList = [];
+                    renderPatternModificationsList();
+                    
+                    hidePatternModificationModal();
+                    showMessage(`Pattern modifications applied successfully. The cutting plan has been reoptimized with the new lengths.`, 'success');
+                } catch (error) {
+                    console.error('Error applying pattern modifications:', error);
+                    showMessage('Error applying pattern modifications: ' + error.message, 'error');
+                } finally {
+                    showLoading(false);
+                }
+            }, 500);
+        }
+
+        // --- EXISTING MODIFICATION FEATURES FOR RAW MATERIAL LENGTHS ---
         // Show modification modal
         function showModificationModal() {
             document.getElementById('modification-modal').classList.remove('hidden');
@@ -950,7 +1725,7 @@
                             scrapItems.push({
                                 section: section,
                                 steel: steel,
-                                scrap_mm: scrap
+                                scrap_mm: scrap,
                             });
                         }
                     }
@@ -976,7 +1751,7 @@
                 };
             }).sort((a, b) => b.scrap_mm - a.scrap_mm);
         }
-        
+
         // --- DATA INPUT & PARSING ---
         function processFile() {
             const file = fileInput.files[0];
@@ -1255,11 +2030,13 @@
             document.getElementById('detail-plan').innerHTML = detailHTML;
             
             // Add confirmation message for modifications
-            if (modificationsList.length > 0) {
+            if (modificationsList.length > 0 || patternModificationsList.length > 0) {
                 const message = `Modifications applied successfully. The modified plan is now displayed.`;
                 showMessage(message, 'success');
                 modificationsList = [];
+                patternModificationsList = [];
                 renderModificationsList();
+                renderPatternModificationsList();
             }
         }
         
@@ -1357,7 +2134,7 @@
         }
         
         function generateAggregatedScrapTable(scrapData) {
-            if (scrapData.length === 0) return '<p class="text-gray-500">No valuable scrap (≥ 1.5 m) was generated in this plan.</p>';
+            if (scrapData.length === 0) return '<p class="text-gray-500">No valuable scrap (≥ 0.1 m) was generated in this plan.</p>';
             let html = `
                 <table class="min-w-full divide-y divide-gray-200 rounded-lg overflow-hidden">
                     <thead class="bg-secondary text-white">
@@ -1372,7 +2149,7 @@
             `;
             scrapData.forEach(item => {
                 html += `
-                    <tr class="hover:bg-gray-50">
+                    <tr class="scrap-row hover:bg-gray-50" onclick="showScrapModificationModal(${JSON.stringify(item).replace(/"/g, '&quot;')})">
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.section}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">${item.steel}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-700">${item.scrap_m} m</td>
@@ -1423,6 +2200,7 @@
                         const totalWeight = (pattern.rawLength / 1000) * weightPerMeter;
                         const efficiency = totalWeight > 0 ? (usedWeight / totalWeight * 100).toFixed(1) : '0.0';
                         const efficiencyColor = efficiency >= 95 ? 'text-green-600' : 'text-orange-600';
+                        const patternWeight = (usedWeight * pattern.count).toFixed(2);
                         html += `
                             <div class="mb-4 p-3 border border-gray-100 rounded-md bg-gray-50">
                                 <div class="flex justify-between items-center mb-2">
@@ -1430,6 +2208,7 @@
                                     <div class="flex items-center">
                                         <span class="text-sm font-medium mr-2">Raw: ${formatLength(pattern.rawLength)}</span>
                                         <span class="text-xs ${efficiencyColor} font-semibold">${efficiency}% eff.</span>
+                                        <span class="text-xs text-gray-600 ml-2">Weight: ${patternWeight} kg</span>
                                     </div>
                                 </div>
                                 <div class="flex flex-wrap gap-2">
@@ -1547,6 +2326,7 @@
                             'Cuts Description': cutsDescription,
                             'Scrap per Bar (m)': formatLength(pattern.totalScrap / pattern.count),
                             'Efficiency (%)': efficiency + '%',
+                            'Weight (kg)': (usedWeight * pattern.count).toFixed(2),
                             'Weight per meter (kg/m)': weightPerMeter
                         });
                     });
@@ -1642,7 +2422,7 @@
                 if (finalPlan.aggregatedScrap.length > 0) {
                     doc.addPage();
                     doc.setFontSize(14);
-                    doc.text('4. Valuable Scrap Report (≥ 1.5 m)', 20, 20);
+                    doc.text('4. Valuable Scrap Report (≥ 0.1 m)', 20, 20);
                     doc.autoTable({
                         startY: 30,
                         head: [['Section', 'Steel Grade', 'Scrap Length (m)', 'Quantity']],
