@@ -111,6 +111,22 @@
             cursor: pointer;
             font-weight: bold;
         }
+        /* Editable scrap length cell */
+        .scrap-editable {
+            cursor: pointer;
+            border-bottom: 1px dashed #3b82f6;
+            padding-bottom: 1px;
+            transition: background-color 0.15s;
+        }
+        .scrap-editable:hover {
+            background-color: #dbeafe;
+            border-radius: 4px;
+        }
+        .scrap-edit-icon {
+            font-size: 0.7rem;
+            color: #3b82f6;
+            margin-left: 4px;
+        }
     </style>
 
     <!-- Essential Libraries for Excel/PDF Handling -->
@@ -184,6 +200,25 @@
                 <p class="text-xs text-gray-500 mt-2">* Sections not added will use default 12000mm with unlimited quantity.</p>
             </div>
 
+            <!-- Pincher Scrap Setting -->
+            <div class="mb-6 mt-4 p-4 border border-amber-200 bg-amber-50 rounded-lg">
+                <h3 class="text-lg font-medium text-gray-700 mb-2">Pincher Scrap (Gripping Allowance) — خردة الكلابة</h3>
+                <div class="flex items-center gap-3 flex-wrap">
+                    <input type="number" id="pincher-scrap-input" min="0" step="1" value="0" placeholder="0"
+                        class="w-40 p-2 border border-gray-300 rounded-md bg-white">
+                    <span class="text-sm font-semibold text-gray-700">mm</span>
+                    <span class="text-sm text-gray-600">
+                        Applied ONLY to sections from the smallest up to <b>L90</b> (inclusive).
+                        This length is reserved on each raw bar for the pincher grip, so the punch never hits the pincher.
+                        Larger sections (L100 and above) are not affected.
+                    </span>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">
+                    Example: pieces total = 11,000 mm, Pincher Scrap = 100 mm → consumed = 11,100 mm.
+                    On a 12,000 mm bar the remaining scrap = 12,000 − 11,100 = 900 mm.
+                </p>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-end mt-4">
                 <!-- File Input -->
                 <div class="col-span-1">
@@ -251,7 +286,7 @@
             <!-- Scrap Report -->
             <div class="card bg-white p-6 rounded-xl mb-8 border border-gray-200">
                 <h2 class="text-2xl font-semibold mb-4 text-secondary">4. Valuable Scrap Report (≥ 1.5 m)</h2>
-                <p class="text-sm text-gray-600 mb-4">Aggregated by identical length for easy inventory.</p>
+                <p class="text-sm text-gray-600 mb-4">Aggregated by identical length for easy inventory. <span class="text-blue-700 font-medium">Click on any Scrap Length value to edit it</span> — the raw bar length will be adjusted automatically (cuts + pincher scrap + new scrap) and Efficiency will be recalculated.</p>
                 <div id="scrap-table" class="table-container"></div>
             </div>
 
@@ -271,6 +306,7 @@
         const SCRAP_THRESHOLD = 1500; // 1.5 meters in mm
         const LENGTH_INCREMENT = 100; // 10 cm increment
         const DEFAULT_LENGTH = 12000; // default when not specified
+        const PINCHER_MAX_LEG = 90; // Pincher scrap applies to sections with leg size <= 90mm (up to L90 inclusive)
 
         // Generate Available Raw Material Lengths with 10cm increments (for variable option)
         const AVAILABLE_LENGTHS = [];
@@ -487,6 +523,46 @@
             
             console.error(`لم يتم العثور على الوزن للقطاع: ${sectionName} (المعيار: ${normalizedSection})`);
             showMessage(`Warning: Section ${sectionName} not found in database. Weight calculation may be inaccurate.`, 'error');
+            return 0;
+        }
+
+        // --- PINCHER SCRAP HELPERS ---
+
+        /**
+         * Extracts the leg size (mm) from an angle section name.
+         * Works with formats like "L90*6", "L90X6", "90X90X6".
+         * @param {string} sectionName
+         * @returns {number|null} leg size in mm, or null if not parseable.
+         */
+        function getSectionLegSize(sectionName) {
+            const normalized = normalizeSectionName(sectionName); // e.g. "L90X6" or "90X90X6"
+            const match = normalized.match(/^L?(\d+(?:\.\d+)?)/);
+            return match ? parseFloat(match[1]) : null;
+        }
+
+        /**
+         * Reads the user-entered pincher scrap value (mm) from the UI.
+         * @returns {number} pincher scrap in mm (0 if empty/invalid).
+         */
+        function getPincherScrapInputValue() {
+            const el = document.getElementById('pincher-scrap-input');
+            const val = el ? parseFloat(el.value) : 0;
+            return (!isNaN(val) && val > 0) ? val : 0;
+        }
+
+        /**
+         * Returns the pincher allowance (mm) that applies to a given section.
+         * Applies only to sections from the smallest up to L90 (leg <= 90mm).
+         * @param {string} sectionName
+         * @param {number} pincherScrap - user-entered value in mm.
+         * @returns {number} allowance in mm (0 if section is larger than L90).
+         */
+        function getPincherAllowanceForSection(sectionName, pincherScrap) {
+            if (!pincherScrap || pincherScrap <= 0) return 0;
+            const leg = getSectionLegSize(sectionName);
+            if (leg !== null && leg <= PINCHER_MAX_LEG) {
+                return pincherScrap;
+            }
             return 0;
         }
 
@@ -740,7 +816,10 @@
                     renderReports(finalPlan);
                     outputArea.classList.remove('hidden');
                     downloadControls.classList.remove('hidden');
-                    showMessage(`Optimization complete. Processed ${rawData.length} total piece requirements.`, 'success');
+                    const overallEff = finalPlan.overall.rawMaterialWeight_kg > 0
+                        ? (finalPlan.overall.netWeight_kg / finalPlan.overall.rawMaterialWeight_kg * 100).toFixed(2)
+                        : '0.00';
+                    showMessage(`Optimization complete. Processed ${rawData.length} total piece requirements. Overall material efficiency: ${overallEff}%.`, 'success');
 
                 } catch (error) {
                     console.error('Error processing file:', error);
@@ -766,7 +845,10 @@
                 renderReports(finalPlan);
                 outputArea.classList.remove('hidden');
                 downloadControls.classList.remove('hidden');
-                showMessage(`Optimization complete with custom lengths. Processed ${rawData.length} pieces.`, 'success');
+                const overallEffCustom = finalPlan.overall.rawMaterialWeight_kg > 0
+                    ? (finalPlan.overall.netWeight_kg / finalPlan.overall.rawMaterialWeight_kg * 100).toFixed(2)
+                    : '0.00';
+                showMessage(`Optimization complete with custom lengths. Processed ${rawData.length} pieces. Overall material efficiency: ${overallEffCustom}%.`, 'success');
             } catch (error) {
                 console.error('Error during optimization:', error);
                 showMessage(`Optimization error: ${error.message}`, 'error');
@@ -841,22 +923,40 @@
                 const pieces = group.pieces;
                 const totalRequiredLength = pieces.reduce((sum, p) => sum + p.length, 0);
 
+                // Pincher allowance for this section (only applies up to L90)
+                const pincherScrapValue = getPincherScrapInputValue();
+                const pincherAllowance = getPincherAllowanceForSection(group.section, pincherScrapValue);
+
                 let optimalPlan;
                 
                 if (selectedOption === 'variable') {
-                    optimalPlan = findBestFitMultiLength(pieces);
+                    // Run both engines and keep the better result
+                    const planBFD = findBestFitMultiLength([...pieces], pincherAllowance);
+                    const planDP = findBestFitMultiLengthDP([...pieces], pincherAllowance);
+                    optimalPlan = pickBetterPlan(planDP, planBFD);
                 } else { // custom
                     // Get custom stock items for this key, if any
                     const stockItems = customStockMap ? customStockMap.get(key) : null;
                     if (stockItems && stockItems.length > 0) {
-                        optimalPlan = findBestFitCustomLengthsWithQuantities(pieces, stockItems);
+                        const planBFD = findBestFitCustomLengthsWithQuantities([...pieces], stockItems, pincherAllowance);
+                        const planDP = findBestFitCustomLengthsDP([...pieces], stockItems, pincherAllowance);
+                        optimalPlan = pickBetterPlan(planDP, planBFD);
                     } else {
                         // No custom lengths for this group: use default 12m unlimited
-                        optimalPlan = findBestFitFixedLength(pieces, DEFAULT_LENGTH);
+                        const planBFD = findBestFitFixedLength([...pieces], DEFAULT_LENGTH, pincherAllowance);
+                        const planDP = findBestFitFixedLengthDP([...pieces], DEFAULT_LENGTH, pincherAllowance);
+                        optimalPlan = pickBetterPlan(planDP, planBFD);
                     }
                 }
                 
                 const totalRawLengthUsed = optimalPlan.rawBars.reduce((sum, bar) => sum + bar.rawLength, 0);
+
+                // Safety check: warn if some pieces could not be placed (e.g., piece longer than usable length after pincher allowance)
+                const placedCount = optimalPlan.rawBars.reduce((sum, bar) => sum + bar.cuts.length, 0);
+                if (placedCount < pieces.length) {
+                    const missing = pieces.length - placedCount;
+                    showMessage(`Warning: ${missing} piece(s) of ${group.section} could not be placed. Check if piece length exceeds (raw length − pincher scrap of ${pincherAllowance} mm).`, 'error');
+                }
                 
                 const netWeight_kg = (totalRequiredLength / 1000) * group.weightPerMeter;
                 const rawMaterialWeight_kg = (totalRawLengthUsed / 1000) * group.weightPerMeter;
@@ -878,6 +978,7 @@
                     section: group.section,
                     steel: group.steel,
                     weightPerMeter: group.weightPerMeter,
+                    pincherAllowance: pincherAllowance,
                     rawLengthsUsed: rawLengthsUsedSummary,
                     rawBarsNeeded: totalBarsNeeded,
                     netWeight_kg: netWeight_kg,
@@ -892,7 +993,8 @@
 
                 results.detailed[key] = {
                     ...optimalPlan,
-                    weightPerMeter: group.weightPerMeter
+                    weightPerMeter: group.weightPerMeter,
+                    pincherAllowance: pincherAllowance
                 };
 
                 optimalPlan.rawBars.forEach((bar) => {
@@ -931,19 +1033,20 @@
         }
 
         // Helper function for fixed length (used as fallback for custom option)
-        function findBestFitFixedLength(pieces, rawLength) {
-            const result = runSingleLengthPlan_BFD(pieces, rawLength);
+        function findBestFitFixedLength(pieces, rawLength, pincherAllowance = 0) {
+            const result = runSingleLengthPlan_BFD(pieces, rawLength, pincherAllowance);
             
             return {
                 rawBars: result.bars.map(bar => ({
                     cuts: bar.cuts,
                     remaining: bar.remaining,
-                    rawLength: rawLength
+                    rawLength: rawLength,
+                    pincherAllowance: pincherAllowance
                 }))
             };
         }
 
-        function findBestFitMultiLength(pieces) {
+        function findBestFitMultiLength(pieces, pincherAllowance = 0) {
             let remainingPieces = [...pieces].sort((a, b) => b.length - a.length);
             const finalRawBars = [];
             let stockLengthsUsed = new Set();
@@ -959,7 +1062,7 @@
                 for (const trialLength of AVAILABLE_LENGTHS) {
                     if (stockLengthsUsed.has(trialLength)) continue;
                     
-                    const trialPlan = runSingleLengthPlan_BFD(remainingPieces, trialLength);
+                    const trialPlan = runSingleLengthPlan_BFD(remainingPieces, trialLength, pincherAllowance);
                     
                     if (trialPlan.bars.length === 0) continue;
                     
@@ -990,7 +1093,8 @@
                     finalRawBars.push({
                         cuts: bar.cuts,
                         remaining: bar.remaining,
-                        rawLength: optimalLength
+                        rawLength: optimalLength,
+                        pincherAllowance: pincherAllowance
                     });
                 });
                 
@@ -1004,7 +1108,7 @@
             };
         }
 
-        function findBestFitCustomLengthsWithQuantities(pieces, stockItems) {
+        function findBestFitCustomLengthsWithQuantities(pieces, stockItems, pincherAllowance = 0) {
             // stockItems: array of {length, quantity} sorted descending by length
             let remainingPieces = [...pieces].sort((a, b) => b.length - a.length);
             const finalRawBars = [];
@@ -1031,7 +1135,7 @@
                     if (stock.remaining <= 0) continue;
 
                     const trialLength = stock.length;
-                    const trialPlan = runSingleLengthPlan_BFD(remainingPieces, trialLength);
+                    const trialPlan = runSingleLengthPlan_BFD(remainingPieces, trialLength, pincherAllowance);
                     
                     if (trialPlan.bars.length === 0) continue;
                     
@@ -1072,7 +1176,8 @@
                         finalRawBars.push({
                             cuts: bar.cuts,
                             remaining: bar.remaining,
-                            rawLength: optimalLength
+                            rawLength: optimalLength,
+                            pincherAllowance: pincherAllowance
                         });
                     });
                     
@@ -1089,7 +1194,8 @@
                         finalRawBars.push({
                             cuts: bar.cuts,
                             remaining: bar.remaining,
-                            rawLength: optimalLength
+                            rawLength: optimalLength,
+                            pincherAllowance: pincherAllowance
                         });
                     });
                     
@@ -1102,7 +1208,14 @@
             };
         }
         
-        function runSingleLengthPlan_BFD(pieces, rawLength) {
+        function runSingleLengthPlan_BFD(pieces, rawLength, pincherAllowance = 0) {
+            // Usable cutting length per bar = raw length minus the pincher gripping allowance.
+            // The pincher holds the bar by this length so the punch never damages the pincher.
+            // Example: raw = 12000mm, allowance = 100mm -> only 11900mm can be cut into pieces.
+            // If pieces total 11000mm, remaining scrap = 12000 - (11000 + 100) = 900mm.
+            const usableLength = rawLength - pincherAllowance;
+            if (usableLength <= 0) return { bars: [] };
+
             const sortedPieces = [...pieces].sort((a, b) => b.length - a.length);
             const bars = [];
             
@@ -1131,18 +1244,239 @@
                 }
                 
                 if (!placed) {
-                    if (pieceLength > rawLength) {
-                        // This piece cannot be placed, skip (should be handled by validation)
+                    if (pieceLength > usableLength) {
+                        // This piece cannot be placed within the usable length, skip (should be handled by validation)
                         continue;
                     }
                     bars.push({
                         cuts: [piece],
-                        remaining: rawLength - pieceLength
+                        remaining: usableLength - pieceLength, // remaining excludes the pincher allowance
+                        pincherAllowance: pincherAllowance
                     });
                 }
             }
 
             return { bars: bars };
+        }
+
+        // --- ADVANCED OPTIMIZATION ENGINE (Dynamic Programming) ---
+        // For each raw bar, finds the COMBINATION of pieces that maximizes the used length
+        // (bounded-knapsack subset-sum). This typically beats Best-Fit-Decreasing significantly.
+        // Both engines run and the better plan is kept automatically, so results never get worse.
+
+        /**
+         * Finds the best combination of piece types that maximizes total length <= capacity.
+         * @param {Array} types - [{length, count}] piece types (integer lengths in mm).
+         * @param {number} capacity - usable length in mm.
+         * @returns {{total: number, counts: number[]}} best total and pieces used per type.
+         */
+        function findBestPatternDP(types, capacity) {
+            const cap = Math.floor(capacity);
+            if (cap <= 0) return { total: 0, counts: types.map(() => 0) };
+
+            const reachable = new Uint8Array(cap + 1);
+            reachable[0] = 1;
+            const fromType = new Int32Array(cap + 1).fill(-1);
+
+            for (let t = 0; t < types.length; t++) {
+                const L = types[t].length;
+                if (L > cap) continue;
+                const c = types[t].count;
+                const used = new Int32Array(cap + 1); // pieces of type t used to reach each sum (this pass)
+                for (let s = L; s <= cap; s++) {
+                    if (!reachable[s] && reachable[s - L] && used[s - L] < c) {
+                        reachable[s] = 1;
+                        fromType[s] = t;
+                        used[s] = used[s - L] + 1;
+                    }
+                }
+                if (reachable[cap]) break; // perfect fill found — cannot do better
+            }
+
+            let best = cap;
+            while (best > 0 && !reachable[best]) best--;
+
+            const counts = new Array(types.length).fill(0);
+            let s = best;
+            while (s > 0) {
+                const t = fromType[s];
+                if (t === -1) break; // safety
+                counts[t]++;
+                s -= types[t].length;
+            }
+            return { total: best, counts };
+        }
+
+        /**
+         * Groups individual pieces into types by identical length.
+         * Returns null if any length is non-integer (DP requires integer mm).
+         */
+        function buildPieceTypes(pieces) {
+            const typeMap = new Map();
+            for (const p of pieces) {
+                if (!Number.isInteger(p.length)) return null;
+                if (!typeMap.has(p.length)) typeMap.set(p.length, []);
+                typeMap.get(p.length).push(p);
+            }
+            // Sort descending by length for stable behavior
+            return Array.from(typeMap.entries())
+                .map(([length, items]) => ({ length, items }))
+                .sort((a, b) => b.length - a.length);
+        }
+
+        /**
+         * VARIABLE MODE (DP): builds the fullest possible pattern up to the maximum usable
+         * length, then picks the SHORTEST available raw length (10cm increments) that fits it.
+         * Result: end scrap per bar is usually below one increment (< 100mm).
+         */
+        function findBestFitMultiLengthDP(pieces, pincherAllowance = 0) {
+            const types = buildPieceTypes(pieces);
+            if (!types) return null; // non-integer lengths -> caller falls back to BFD
+
+            const maxUsable = MAX_RAW_LENGTH - pincherAllowance;
+            const finalRawBars = [];
+            let guard = pieces.length + 10;
+
+            while (guard-- > 0) {
+                const active = types.filter(t => t.items.length > 0 && t.length <= maxUsable);
+                if (active.length === 0) break;
+
+                const dpTypes = active.map(t => ({ length: t.length, count: t.items.length }));
+                const pattern = findBestPatternDP(dpTypes, maxUsable);
+                if (!pattern || pattern.total <= 0) break;
+
+                const cuts = [];
+                pattern.counts.forEach((c, i) => {
+                    for (let k = 0; k < c; k++) cuts.push(active[i].items.pop());
+                });
+
+                const neededLength = pattern.total + pincherAllowance;
+                const rawLength = Math.max(
+                    MIN_RAW_LENGTH,
+                    Math.ceil(neededLength / LENGTH_INCREMENT) * LENGTH_INCREMENT
+                );
+
+                finalRawBars.push({
+                    cuts: cuts,
+                    remaining: rawLength - pincherAllowance - pattern.total,
+                    rawLength: rawLength,
+                    pincherAllowance: pincherAllowance
+                });
+            }
+
+            return { rawBars: finalRawBars };
+        }
+
+        /**
+         * FIXED LENGTH (DP): repeatedly fills one bar at a time with the max-fill pattern.
+         */
+        function findBestFitFixedLengthDP(pieces, rawLength, pincherAllowance = 0) {
+            const types = buildPieceTypes(pieces);
+            if (!types) return null;
+
+            const capacity = rawLength - pincherAllowance;
+            if (capacity <= 0) return { rawBars: [] };
+
+            const finalRawBars = [];
+            let guard = pieces.length + 10;
+
+            while (guard-- > 0) {
+                const active = types.filter(t => t.items.length > 0 && t.length <= capacity);
+                if (active.length === 0) break;
+
+                const dpTypes = active.map(t => ({ length: t.length, count: t.items.length }));
+                const pattern = findBestPatternDP(dpTypes, capacity);
+                if (!pattern || pattern.total <= 0) break;
+
+                const cuts = [];
+                pattern.counts.forEach((c, i) => {
+                    for (let k = 0; k < c; k++) cuts.push(active[i].items.pop());
+                });
+
+                finalRawBars.push({
+                    cuts: cuts,
+                    remaining: capacity - pattern.total,
+                    rawLength: rawLength,
+                    pincherAllowance: pincherAllowance
+                });
+            }
+
+            return { rawBars: finalRawBars };
+        }
+
+        /**
+         * CUSTOM STOCK (DP): one bar at a time — for every stock length still in inventory,
+         * computes the max-fill pattern and consumes the bar with the highest utilization.
+         */
+        function findBestFitCustomLengthsDP(pieces, stockItems, pincherAllowance = 0) {
+            const types = buildPieceTypes(pieces);
+            if (!types) return null;
+
+            const stock = stockItems.map(s => ({ length: s.length, remaining: s.quantity }));
+            const finalRawBars = [];
+            let guard = pieces.length + 10;
+
+            while (guard-- > 0) {
+                if (!types.some(t => t.items.length > 0)) break;
+
+                let best = null;
+                for (const s of stock) {
+                    if (s.remaining <= 0) continue;
+                    const capacity = s.length - pincherAllowance;
+                    if (capacity <= 0) continue;
+
+                    const active = types.filter(t => t.items.length > 0 && t.length <= capacity);
+                    if (active.length === 0) continue;
+
+                    const dpTypes = active.map(t => ({ length: t.length, count: t.items.length }));
+                    const pattern = findBestPatternDP(dpTypes, capacity);
+                    if (!pattern || pattern.total <= 0) continue;
+
+                    const utilization = pattern.total / s.length;
+                    if (!best || utilization > best.utilization) {
+                        best = { stockRef: s, active, pattern, utilization, capacity };
+                    }
+                }
+
+                if (!best) break; // nothing fits anymore
+
+                const cuts = [];
+                best.pattern.counts.forEach((c, i) => {
+                    for (let k = 0; k < c; k++) cuts.push(best.active[i].items.pop());
+                });
+
+                finalRawBars.push({
+                    cuts: cuts,
+                    remaining: best.capacity - best.pattern.total,
+                    rawLength: best.stockRef.length,
+                    pincherAllowance: pincherAllowance
+                });
+                best.stockRef.remaining -= 1;
+            }
+
+            return { rawBars: finalRawBars };
+        }
+
+        // --- PLAN COMPARISON (keeps the better of BFD vs DP, never worse) ---
+
+        function evaluatePlanQuality(plan) {
+            const bars = plan.rawBars.filter(b => b.rawLength > 0);
+            return {
+                placed: bars.reduce((sum, b) => sum + b.cuts.length, 0),
+                totalRaw: bars.reduce((sum, b) => sum + b.rawLength, 0),
+                barCount: bars.length
+            };
+        }
+
+        function pickBetterPlan(planA, planB) {
+            if (!planA) return planB;
+            if (!planB) return planA;
+            const a = evaluatePlanQuality(planA);
+            const b = evaluatePlanQuality(planB);
+            // 1) Place as many pieces as possible  2) Use less raw material  3) Use fewer bars
+            if (a.placed !== b.placed) return a.placed > b.placed ? planA : planB;
+            if (a.totalRaw !== b.totalRaw) return a.totalRaw < b.totalRaw ? planA : planB;
+            return a.barCount <= b.barCount ? planA : planB;
         }
 
         // --- REPORT RENDERING (unchanged from previous version) ---
@@ -1218,6 +1552,7 @@
                             <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Section</th>
                             <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Steel Grade</th>
                             <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Weight/m (kg)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Pincher Scrap (mm)</th>
                             <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Raw Lengths Used (Qty)</th>
                             <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Total Bars</th>
                             <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Net Weight (t)</th>
@@ -1242,6 +1577,7 @@
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.section}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">${item.steel}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-600">${item.weightPerMeter}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm ${item.pincherAllowance > 0 ? 'text-amber-700 font-semibold' : 'text-gray-400'}">${item.pincherAllowance > 0 ? item.pincherAllowance : '—'}</td>
                         <td class="px-3 py-4 text-sm">${lengthsTags}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-secondary">${item.rawBarsNeeded}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-700">${netWeightTonne} t</td>
@@ -1256,7 +1592,7 @@
             html += `
                 <tfoot>
                     <tr class="total-row">
-                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold" colspan="4">GRAND TOTAL</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-bold" colspan="5">GRAND TOTAL</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-secondary">${grandTotals.totalBars}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-gray-700">${grandNetWeightTonne} t</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-gray-700">${grandRawMaterialWeightTonne} t</td>
@@ -1286,12 +1622,14 @@
                     <tbody class="bg-white divide-y divide-gray-200">
             `;
 
-            scrapData.forEach(item => {
+            scrapData.forEach((item, index) => {
                 html += `
                     <tr class="hover:bg-gray-50">
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.section}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">${item.steel}</td>
-                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-700">${item.scrap_m} m</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-700">
+                            <span id="scrap-display-${index}" class="scrap-editable" onclick="startScrapEdit(${index})" title="Click to edit scrap length">${item.scrap_m} m<span class="scrap-edit-icon">✎</span></span>
+                        </td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm font-bold text-secondary">${item.qty}</td>
                     </tr>
                 `;
@@ -1302,6 +1640,223 @@
             return html;
         }
 
+        // --- INTERACTIVE SCRAP LENGTH EDITING ---
+
+        /**
+         * Turns the clicked scrap length display into an inline number input (in mm).
+         */
+        function startScrapEdit(index) {
+            const item = finalPlan.aggregatedScrap[index];
+            if (!item) return;
+            const span = document.getElementById(`scrap-display-${index}`);
+            if (!span || span.dataset.editing === '1') return;
+            span.dataset.editing = '1';
+            span.classList.remove('scrap-editable');
+            span.onclick = null;
+
+            const currentMm = Math.round(item.scrap_mm);
+            span.innerHTML = `
+                <input type="number" id="scrap-input-${index}" value="${currentMm}" min="0" step="1"
+                    class="w-28 p-1 border-2 border-secondary rounded text-sm" />
+                <span class="text-xs text-gray-500">mm (Enter = apply, Esc = cancel)</span>
+            `;
+            const input = document.getElementById(`scrap-input-${index}`);
+            input.focus();
+            input.select();
+
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitScrapEdit(index);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelScrapEdit(index);
+                }
+            });
+            input.addEventListener('blur', function() {
+                // Small delay so Enter/Escape handlers run first
+                setTimeout(() => commitScrapEdit(index), 100);
+            });
+        }
+
+        function cancelScrapEdit(index) {
+            const input = document.getElementById(`scrap-input-${index}`);
+            if (input) input.dataset.done = '1';
+            // Re-render the scrap table only (values unchanged)
+            document.getElementById('scrap-table').innerHTML = generateAggregatedScrapTable(finalPlan.aggregatedScrap);
+        }
+
+        function commitScrapEdit(index) {
+            const input = document.getElementById(`scrap-input-${index}`);
+            if (!input || input.dataset.done === '1') return;
+            input.dataset.done = '1';
+
+            const item = finalPlan.aggregatedScrap[index];
+            const newScrap = parseFloat(input.value);
+            const oldScrapRounded = Math.round(item.scrap_mm);
+
+            if (isNaN(newScrap) || newScrap < 0) {
+                showMessage('Invalid scrap length. Please enter a number ≥ 0 (mm).', 'error');
+                cancelScrapEditRender();
+                return;
+            }
+            if (Math.round(newScrap) === oldScrapRounded) {
+                // No change
+                cancelScrapEditRender();
+                return;
+            }
+
+            applyScrapEdit(index, newScrap);
+        }
+
+        function cancelScrapEditRender() {
+            document.getElementById('scrap-table').innerHTML = generateAggregatedScrapTable(finalPlan.aggregatedScrap);
+        }
+
+        /**
+         * Applies a new scrap length to all bars behind an aggregated scrap row.
+         * New raw bar length = (cuts total + pincher allowance) + new scrap.
+         * Then rebuilds all statistics (weights, efficiency) and re-renders the reports.
+         */
+        function applyScrapEdit(index, newScrap) {
+            const item = finalPlan.aggregatedScrap[index];
+            const key = `${item.section}|${item.steel}`;
+            const groupPlan = finalPlan.detailed[key];
+            if (!groupPlan) {
+                showMessage('Could not locate the material group for this scrap row.', 'error');
+                cancelScrapEditRender();
+                return;
+            }
+
+            const oldScrapRounded = Math.round(item.scrap_mm);
+            const targetBars = groupPlan.rawBars.filter(b =>
+                b.rawLength > 0 && Math.round(b.remaining) === oldScrapRounded
+            );
+
+            if (targetBars.length === 0) {
+                showMessage('No matching bars found for this scrap value. The plan may have changed.', 'error');
+                cancelScrapEditRender();
+                return;
+            }
+
+            // Validate all affected bars BEFORE applying: new raw length must stay within mill limits
+            for (const bar of targetBars) {
+                const usedLength = bar.rawLength - bar.remaining; // cuts total + pincher allowance
+                const newRaw = usedLength + newScrap;
+                if (newRaw < MIN_RAW_LENGTH || newRaw > MAX_RAW_LENGTH) {
+                    showMessage(`Cannot apply: the new raw bar length would be ${newRaw.toFixed(0)} mm, which is outside the allowed range (${MIN_RAW_LENGTH}–${MAX_RAW_LENGTH} mm). Used length on this bar (cuts + pincher) = ${usedLength.toFixed(0)} mm.`, 'error');
+                    cancelScrapEditRender();
+                    return;
+                }
+            }
+
+            // Apply the change
+            const rawChanges = new Set();
+            targetBars.forEach(bar => {
+                const usedLength = bar.rawLength - bar.remaining;
+                const newRaw = usedLength + newScrap;
+                rawChanges.add(`${bar.rawLength.toFixed(0)} → ${newRaw.toFixed(0)} mm`);
+                bar.rawLength = newRaw;
+                bar.remaining = newScrap;
+            });
+
+            // Rebuild all derived statistics and re-render everything
+            rebuildPlanStatistics(finalPlan);
+            renderReports(finalPlan);
+
+            const changesText = Array.from(rawChanges).join(', ');
+            const note = newScrap < SCRAP_THRESHOLD
+                ? ` Note: the new scrap (${newScrap} mm) is below ${SCRAP_THRESHOLD} mm, so it no longer appears in the Valuable Scrap Report.`
+                : '';
+            showMessage(`Scrap updated for ${targetBars.length} bar(s) of ${item.section} ${item.steel}: raw length adjusted (${changesText}). Weights and efficiency recalculated.${note}`, 'success');
+        }
+
+        /**
+         * Rebuilds summary, overall totals, and the aggregated scrap report
+         * from the (possibly edited) bars in plan.detailed.
+         */
+        function rebuildPlanStatistics(plan) {
+            plan.summary = [];
+            plan.scrap = [];
+            plan.overall = {
+                netWeight_kg: 0,
+                rawMaterialWeight_kg: 0,
+                totalEfficiency: 0,
+                groupCount: 0
+            };
+
+            for (const key in plan.detailed) {
+                const [section, steel] = key.split('|');
+                const groupPlan = plan.detailed[key];
+                const weightPerMeter = groupPlan.weightPerMeter;
+                const pincherAllowance = groupPlan.pincherAllowance || 0;
+                const bars = groupPlan.rawBars.filter(b => b.rawLength > 0);
+
+                const totalRequiredLength = bars.flatMap(b => b.cuts).reduce((sum, c) => sum + c.length, 0);
+                const totalRawLengthUsed = bars.reduce((sum, b) => sum + b.rawLength, 0);
+
+                const netWeight_kg = (totalRequiredLength / 1000) * weightPerMeter;
+                const rawMaterialWeight_kg = (totalRawLengthUsed / 1000) * weightPerMeter;
+                const efficiency = rawMaterialWeight_kg > 0 ? (netWeight_kg / rawMaterialWeight_kg) * 100 : 0;
+
+                const rawLengthCounts = bars.reduce((acc, bar) => {
+                    const lenKey = bar.rawLength.toFixed(0);
+                    acc[lenKey] = (acc[lenKey] || 0) + 1;
+                    return acc;
+                }, {});
+
+                const rawLengthsUsedSummary = Object.keys(rawLengthCounts).map(len => ({
+                    length_mm: parseFloat(len),
+                    count: rawLengthCounts[len]
+                })).sort((a, b) => b.length_mm - a.length_mm);
+
+                plan.summary.push({
+                    section: section,
+                    steel: steel,
+                    weightPerMeter: weightPerMeter,
+                    pincherAllowance: pincherAllowance,
+                    rawLengthsUsed: rawLengthsUsedSummary,
+                    rawBarsNeeded: bars.length,
+                    netWeight_kg: netWeight_kg,
+                    rawMaterialWeight_kg: rawMaterialWeight_kg,
+                    efficiency: efficiency
+                });
+
+                plan.overall.netWeight_kg += netWeight_kg;
+                plan.overall.rawMaterialWeight_kg += rawMaterialWeight_kg;
+                plan.overall.totalEfficiency += efficiency;
+                plan.overall.groupCount++;
+
+                bars.forEach(bar => {
+                    if (bar.remaining >= SCRAP_THRESHOLD) {
+                        plan.scrap.push({
+                            section: section,
+                            steel: steel,
+                            scrap_mm: bar.remaining
+                        });
+                    }
+                });
+            }
+
+            const aggregatedScrap = plan.scrap.reduce((acc, item) => {
+                const aggKey = `${item.section}|${item.steel}|${item.scrap_mm.toFixed(0)}`;
+                acc[aggKey] = (acc[aggKey] || 0) + 1;
+                return acc;
+            }, {});
+
+            plan.aggregatedScrap = Object.keys(aggregatedScrap).map(aggKey => {
+                const [section, steel, scrap_mm_str] = aggKey.split('|');
+                const scrap_mm = parseFloat(scrap_mm_str);
+                return {
+                    section: section,
+                    steel: steel,
+                    scrap_mm: scrap_mm,
+                    scrap_m: (scrap_mm / 1000).toFixed(3),
+                    qty: aggregatedScrap[aggKey]
+                };
+            }).sort((a, b) => b.scrap_mm - a.scrap_mm);
+        }
+
         function generateDetailedPlan(detailedData) {
             let html = '';
 
@@ -1309,11 +1864,16 @@
                 const [section, steel] = key.split('|');
                 const groupPlan = detailedData[key];
                 const weightPerMeter = groupPlan.weightPerMeter;
+                const groupAllowance = groupPlan.pincherAllowance || 0;
                 
+                const pincherBadge = groupAllowance > 0 
+                    ? `<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 ml-2">Pincher Scrap: ${groupAllowance} mm/bar</span>` 
+                    : '';
+
                 html += `
                     <div class="border border-gray-200 rounded-lg p-4 bg-white">
                         <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-lg font-semibold text-gray-800">${section} - ${steel}</h3>
+                            <h3 class="text-lg font-semibold text-gray-800">${section} - ${steel}${pincherBadge}</h3>
                             <div class="text-right">
                                 <span class="text-sm font-medium text-primary">${groupPlan.rawBars.filter(b => b.rawLength > 0).length} bars used</span>
                                 <div class="text-xs text-gray-500">Weight: ${weightPerMeter} kg/m</div>
@@ -1342,7 +1902,8 @@
                     html += '<p class="text-gray-500">No valid cutting patterns generated.</p>';
                 } else {
                     patterns.forEach((pattern, index) => {
-                        const usedWeight = ((pattern.rawLength - (pattern.totalScrap / pattern.count)) / 1000) * weightPerMeter;
+                        // Net cut length = raw - pincher allowance - end scrap (allowance counts as waste, not as useful material)
+                        const usedWeight = ((pattern.rawLength - groupAllowance - (pattern.totalScrap / pattern.count)) / 1000) * weightPerMeter;
                         const totalWeight = (pattern.rawLength / 1000) * weightPerMeter;
                         const efficiency = totalWeight > 0 ? (usedWeight / totalWeight * 100).toFixed(1) : '0.0';
                         
@@ -1384,7 +1945,7 @@
                         html += `
                                 </div>
                                 <div class="mt-2 text-xs text-gray-500">
-                                    Scrap per bar: ${formatLength(pattern.totalScrap / pattern.count)}
+                                    Scrap per bar: ${formatLength(pattern.totalScrap / pattern.count)}${groupAllowance > 0 ? ` &nbsp;|&nbsp; <span class="text-amber-700 font-medium">Pincher scrap: ${groupAllowance} mm</span>` : ''}
                                 </div>
                             </div>
                         `;
@@ -1408,6 +1969,7 @@
                     'Section': item.section,
                     'Steel Grade': item.steel,
                     'Weight per meter (kg/m)': item.weightPerMeter,
+                    'Pincher Scrap (mm)': item.pincherAllowance || 0,
                     'Raw Lengths Used': item.rawLengthsUsed.map(l => `${formatLength(l.length_mm)} x ${l.count}`).join(', '),
                     'Total Bars': item.rawBarsNeeded,
                     'Net Weight (t)': convertKgToTonneFormatted(item.netWeight_kg),
@@ -1436,6 +1998,7 @@
                     const [section, steel] = key.split('|');
                     const groupPlan = finalPlan.detailed[key];
                     const weightPerMeter = groupPlan.weightPerMeter;
+                    const groupAllowance = groupPlan.pincherAllowance || 0;
                     
                     // Group bars by pattern (same raw length and same cuts)
                     const patternGroups = groupPlan.rawBars.filter(b => b.rawLength > 0).reduce((acc, bar) => {
@@ -1457,8 +2020,8 @@
                     const patterns = Object.values(patternGroups).sort((a, b) => b.count - a.count);
 
                     patterns.forEach((pattern, patternIndex) => {
-                        // Calculate efficiency for this pattern
-                        const usedWeight = ((pattern.rawLength - (pattern.totalScrap / pattern.count)) / 1000) * weightPerMeter;
+                        // Calculate efficiency for this pattern (pincher allowance counts as waste)
+                        const usedWeight = ((pattern.rawLength - groupAllowance - (pattern.totalScrap / pattern.count)) / 1000) * weightPerMeter;
                         const totalWeight = (pattern.rawLength / 1000) * weightPerMeter;
                         const efficiency = totalWeight > 0 ? (usedWeight / totalWeight * 100).toFixed(1) : '0.0';
                         
@@ -1488,6 +2051,7 @@
                             'Quantity': pattern.count,
                             'Raw Material Length (m)': formatLength(pattern.rawLength),
                             'Cuts Description': cutsDescription,
+                            'Pincher Scrap (mm)': groupAllowance,
                             'Scrap per Bar (m)': formatLength(pattern.totalScrap / pattern.count),
                             'Efficiency (%)': efficiency + '%',
                             'Weight per meter (kg/m)': weightPerMeter
@@ -1518,6 +2082,10 @@
                 let optionText = 'Variable Lengths (Optimized)';
                 if (selectedOption === 'custom') optionText = 'Custom Stock Lengths per Section';
                 doc.text(`Raw Material Option: ${optionText}`, 20, 40);
+                const pdfPincherValue = getPincherScrapInputValue();
+                if (pdfPincherValue > 0) {
+                    doc.text(`Pincher Scrap: ${pdfPincherValue} mm (applied to sections up to L${PINCHER_MAX_LEG})`, 20, 48);
+                }
                 
                 // Overall Optimization Summary
                 doc.setFontSize(14);
