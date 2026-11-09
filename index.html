@@ -202,7 +202,7 @@
 
             <!-- Pincher Scrap Setting -->
             <div class="mb-6 mt-4 p-4 border border-amber-200 bg-amber-50 rounded-lg">
-                <h3 class="text-lg font-medium text-gray-700 mb-2">Pincher Scrap (Gripping Allowance) — خردة الكلابة</h3>
+                <h3 class="text-lg font-medium text-gray-700 mb-2">Pincher Scrap</h3>
                 <div class="flex items-center gap-3 flex-wrap">
                     <input type="number" id="pincher-scrap-input" min="0" step="1" value="0" placeholder="0"
                         class="w-40 p-2 border border-gray-300 rounded-md bg-white">
@@ -281,6 +281,13 @@
                 </div>
                 <h2 class="text-xl font-semibold mt-6 mb-3 text-primary">3.1. Cutting Plan Details by Material Group</h2>
                 <div id="summary-table" class="table-container"></div>
+            </div>
+
+            <!-- Unplaced Items Report (insufficient stock) -->
+            <div id="unplaced-card" class="card bg-white p-6 rounded-xl mb-8 border-2 border-red-300 hidden">
+                <h2 class="text-2xl font-semibold mb-2 text-red-700">⚠ 3.2. Items NOT Nested — Insufficient Raw Material</h2>
+                <p class="text-sm text-gray-600 mb-4">These pieces could not be placed in the cutting plan. Add more stock (or longer bars) for the affected sections and run the optimization again.</p>
+                <div id="unplaced-table" class="table-container"></div>
             </div>
 
             <!-- Scrap Report -->
@@ -819,7 +826,7 @@
                     const overallEff = finalPlan.overall.rawMaterialWeight_kg > 0
                         ? (finalPlan.overall.netWeight_kg / finalPlan.overall.rawMaterialWeight_kg * 100).toFixed(2)
                         : '0.00';
-                    showMessage(`Optimization complete. Processed ${rawData.length} total piece requirements. Overall material efficiency: ${overallEff}%.`, 'success');
+                    showMessage(`Optimization complete. Processed ${rawData.length} total piece requirements. Overall material efficiency: ${overallEff}%.${unplacedSummaryText(finalPlan)}`, finalPlan.unplaced.length > 0 ? 'error' : 'success');
 
                 } catch (error) {
                     console.error('Error processing file:', error);
@@ -848,7 +855,7 @@
                 const overallEffCustom = finalPlan.overall.rawMaterialWeight_kg > 0
                     ? (finalPlan.overall.netWeight_kg / finalPlan.overall.rawMaterialWeight_kg * 100).toFixed(2)
                     : '0.00';
-                showMessage(`Optimization complete with custom lengths. Processed ${rawData.length} pieces. Overall material efficiency: ${overallEffCustom}%.`, 'success');
+                showMessage(`Optimization complete with custom lengths. Processed ${rawData.length} pieces. Overall material efficiency: ${overallEffCustom}%.${unplacedSummaryText(finalPlan)}`, finalPlan.unplaced.length > 0 ? 'error' : 'success');
             } catch (error) {
                 console.error('Error during optimization:', error);
                 showMessage(`Optimization error: ${error.message}`, 'error');
@@ -910,6 +917,7 @@
                 summary: [],
                 detailed: {},
                 scrap: [],
+                unplaced: [],
                 overall: { 
                     netWeight_kg: 0, 
                     rawMaterialWeight_kg: 0,
@@ -951,14 +959,47 @@
                 
                 const totalRawLengthUsed = optimalPlan.rawBars.reduce((sum, bar) => sum + bar.rawLength, 0);
 
-                // Safety check: warn if some pieces could not be placed (e.g., piece longer than usable length after pincher allowance)
-                const placedCount = optimalPlan.rawBars.reduce((sum, bar) => sum + bar.cuts.length, 0);
-                if (placedCount < pieces.length) {
-                    const missing = pieces.length - placedCount;
-                    showMessage(`Warning: ${missing} piece(s) of ${group.section} could not be placed. Check if piece length exceeds (raw length − pincher scrap of ${pincherAllowance} mm).`, 'error');
+                // --- Detect pieces that were NOT nested (insufficient stock / piece too long) ---
+                const placedIds = new Set(optimalPlan.rawBars.flatMap(bar => bar.cuts.map(c => c.id)));
+                const unplacedPieces = pieces.filter(p => !placedIds.has(p.id));
+                const placedLength = pieces.filter(p => placedIds.has(p.id)).reduce((sum, p) => sum + p.length, 0);
+
+                // Longest bar available for this group (to explain WHY a piece was left out)
+                let maxStockLength;
+                if (selectedOption === 'variable') {
+                    maxStockLength = Math.max(...AVAILABLE_LENGTHS);
+                } else {
+                    const si = customStockMap ? customStockMap.get(key) : null;
+                    maxStockLength = (si && si.length > 0) ? Math.max(...si.map(x => x.length)) : DEFAULT_LENGTH;
                 }
-                
-                const netWeight_kg = (totalRequiredLength / 1000) * group.weightPerMeter;
+                const maxUsable = maxStockLength - pincherAllowance;
+
+                const unplacedAgg = {};
+                unplacedPieces.forEach(p => {
+                    const tooLong = p.length > maxUsable;
+                    const reason = tooLong ? 'TOO_LONG' : 'STOCK_EXHAUSTED';
+                    const aggKey = `${p.item}|${p.length}|${reason}`;
+                    if (!unplacedAgg[aggKey]) {
+                        unplacedAgg[aggKey] = {
+                            section: group.section,
+                            steel: group.steel,
+                            item: p.item,
+                            length_mm: p.length,
+                            qty: 0,
+                            reason: reason,
+                            maxUsable_mm: maxUsable,
+                            weight_kg: 0
+                        };
+                    }
+                    unplacedAgg[aggKey].qty++;
+                    unplacedAgg[aggKey].weight_kg += (p.length / 1000) * group.weightPerMeter;
+                });
+                Object.values(unplacedAgg)
+                    .sort((a, b) => b.length_mm - a.length_mm)
+                    .forEach(u => results.unplaced.push(u));
+
+                // Net weight counts only the pieces that were actually nested
+                const netWeight_kg = (placedLength / 1000) * group.weightPerMeter;
                 const rawMaterialWeight_kg = (totalRawLengthUsed / 1000) * group.weightPerMeter;
                 const efficiency = rawMaterialWeight_kg > 0 ? (netWeight_kg / rawMaterialWeight_kg) * 100 : 0;
                 
@@ -983,7 +1024,8 @@
                     rawBarsNeeded: totalBarsNeeded,
                     netWeight_kg: netWeight_kg,
                     rawMaterialWeight_kg: rawMaterialWeight_kg,
-                    efficiency: efficiency
+                    efficiency: efficiency,
+                    unplacedCount: unplacedPieces.length
                 });
                 
                 results.overall.netWeight_kg += netWeight_kg;
@@ -994,7 +1036,8 @@
                 results.detailed[key] = {
                     ...optimalPlan,
                     weightPerMeter: group.weightPerMeter,
-                    pincherAllowance: pincherAllowance
+                    pincherAllowance: pincherAllowance,
+                    unplacedCount: unplacedPieces.length
                 };
 
                 optimalPlan.rawBars.forEach((bar) => {
@@ -1120,7 +1163,7 @@
             }));
 
             let attempts = 0;
-            const maxAttempts = stockItems.length * 10; // safety
+            const maxAttempts = stockItems.length * 10 + pieces.length; // safety
 
             while (remainingPieces.length > 0 && attempts < maxAttempts) {
                 attempts++;
@@ -1494,6 +1537,71 @@
             document.getElementById('scrap-table').innerHTML = scrapHTML;
             const detailHTML = generateDetailedPlan(plan.detailed);
             document.getElementById('detail-plan').innerHTML = detailHTML;
+            renderUnplacedReport(plan.unplaced || []);
+        }
+
+        function unplacedReasonText(reason, maxUsable) {
+            return reason === 'TOO_LONG'
+                ? `Piece is longer than the longest available bar (max usable ${formatLength(maxUsable)})`
+                : 'Available stock quantities were exhausted';
+        }
+
+        function renderUnplacedReport(unplaced) {
+            const card = document.getElementById('unplaced-card');
+            const box = document.getElementById('unplaced-table');
+            if (!unplaced || unplaced.length === 0) {
+                card.classList.add('hidden');
+                box.innerHTML = '';
+                return;
+            }
+            const totalQty = unplaced.reduce((s, u) => s + u.qty, 0);
+            const totalWeight = unplaced.reduce((s, u) => s + u.weight_kg, 0);
+            let html = `
+                <table class="min-w-full divide-y divide-gray-200 rounded-lg overflow-hidden">
+                    <thead class="bg-red-600 text-white">
+                        <tr>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Section</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Steel Grade</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Item / Ref</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Piece Length</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Missing Qty</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Weight (t)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">`;
+            unplaced.forEach(u => {
+                html += `
+                        <tr class="hover:bg-red-50">
+                            <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${u.section}</td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${u.steel}</td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${u.item}</td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${formatLength(u.length_mm)}</td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm font-bold text-red-600">${u.qty}</td>
+                            <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${convertKgToTonneFormatted(u.weight_kg)} t</td>
+                            <td class="px-3 py-3 text-sm text-gray-600">${unplacedReasonText(u.reason, u.maxUsable_mm)}</td>
+                        </tr>`;
+            });
+            html += `
+                    </tbody>
+                    <tfoot>
+                        <tr class="total-row">
+                            <td class="px-3 py-3 text-sm font-bold" colspan="4">TOTAL NOT NESTED</td>
+                            <td class="px-3 py-3 text-sm font-bold text-red-600">${totalQty}</td>
+                            <td class="px-3 py-3 text-sm font-bold text-gray-700">${convertKgToTonneFormatted(totalWeight)} t</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>`;
+            box.innerHTML = html;
+            card.classList.remove('hidden');
+        }
+
+        function unplacedSummaryText(plan) {
+            const list = plan.unplaced || [];
+            if (list.length === 0) return '';
+            const qty = list.reduce((s, u) => s + u.qty, 0);
+            return ` ⚠ WARNING: ${qty} piece(s) could NOT be nested due to insufficient raw material — see section 3.2.`;
         }
 
         function renderOverallSummary(overall) {
@@ -1574,7 +1682,7 @@
 
                 html += `
                     <tr class="hover:bg-gray-50">
-                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.section}</td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.section}${item.unplacedCount > 0 ? `<div class="text-xs text-red-600 font-semibold">⚠ ${item.unplacedCount} not nested</div>` : ''}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">${item.steel}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-600">${item.weightPerMeter}</td>
                         <td class="px-3 py-4 whitespace-nowrap text-sm ${item.pincherAllowance > 0 ? 'text-amber-700 font-semibold' : 'text-gray-400'}">${item.pincherAllowance > 0 ? item.pincherAllowance : '—'}</td>
@@ -1819,7 +1927,8 @@
                     rawBarsNeeded: bars.length,
                     netWeight_kg: netWeight_kg,
                     rawMaterialWeight_kg: rawMaterialWeight_kg,
-                    efficiency: efficiency
+                    efficiency: efficiency,
+                    unplacedCount: groupPlan.unplacedCount || 0
                 });
 
                 plan.overall.netWeight_kg += netWeight_kg;
@@ -1873,7 +1982,7 @@
                 html += `
                     <div class="border border-gray-200 rounded-lg p-4 bg-white">
                         <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-lg font-semibold text-gray-800">${section} - ${steel}${pincherBadge}</h3>
+                            <h3 class="text-lg font-semibold text-gray-800">${section} - ${steel}${pincherBadge}${groupPlan.unplacedCount > 0 ? `<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 ml-2">⚠ ${groupPlan.unplacedCount} piece(s) not nested</span>` : ''}</h3>
                             <div class="text-right">
                                 <span class="text-sm font-medium text-primary">${groupPlan.rawBars.filter(b => b.rawLength > 0).length} bars used</span>
                                 <div class="text-xs text-gray-500">Weight: ${weightPerMeter} kg/m</div>
@@ -1980,6 +2089,20 @@
                 const summaryWs = XLSX.utils.json_to_sheet(summaryData);
                 XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
                 
+                // Unplaced Items Sheet (only when some pieces could not be nested)
+                if (finalPlan.unplaced && finalPlan.unplaced.length > 0) {
+                    const unplacedData = finalPlan.unplaced.map(u => ({
+                        'Section': u.section,
+                        'Steel Grade': u.steel,
+                        'Item / Ref': u.item,
+                        'Piece Length (m)': formatLength(u.length_mm),
+                        'Missing Qty': u.qty,
+                        'Weight (t)': convertKgToTonneFormatted(u.weight_kg),
+                        'Reason': unplacedReasonText(u.reason, u.maxUsable_mm)
+                    }));
+                    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(unplacedData), 'Not Nested');
+                }
+
                 // Scrap Sheet
                 const scrapData = finalPlan.aggregatedScrap.map(item => ({
                     'Section': item.section,
@@ -2166,6 +2289,29 @@
                     }
                 });
                 
+                // Items not nested (insufficient stock)
+                if (finalPlan.unplaced && finalPlan.unplaced.length > 0) {
+                    doc.addPage();
+                    doc.setFontSize(14);
+                    doc.text('3.2. Items NOT Nested (Insufficient Raw Material)', 20, 20);
+                    doc.autoTable({
+                        startY: 30,
+                        head: [['Section', 'Steel', 'Item', 'Length (m)', 'Missing Qty', 'Weight (t)', 'Reason']],
+                        body: finalPlan.unplaced.map(u => [
+                            u.section,
+                            u.steel,
+                            u.item,
+                            formatLength(u.length_mm),
+                            u.qty.toString(),
+                            convertKgToTonneFormatted(u.weight_kg),
+                            u.reason === 'TOO_LONG' ? 'Longer than any bar' : 'Stock exhausted'
+                        ]),
+                        theme: 'grid',
+                        headStyles: { fillColor: [220, 38, 38] },
+                        styles: { fontSize: 9 }
+                    });
+                }
+
                 // Valuable Scrap Report
                 if (finalPlan.aggregatedScrap.length > 0) {
                     doc.addPage();
